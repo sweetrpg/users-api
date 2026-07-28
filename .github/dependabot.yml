@@ -12,6 +12,9 @@ updates:
       open-pull-requests-limit: 5
       assignees:
       - "paulyhedral"
+      ignore:
+      - dependency-name: "github.com/vapor/jwt"
+        update-types: ["version-update:semver-major"]
     - package-ecosystem: "github-actions"
       directory: "/"
       schedule:
