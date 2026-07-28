@@ -6,7 +6,6 @@
 // import ImperialGitHub
 // import Vapor
 
-
 // extension AuthController {
 //     static let githubAuthTypeId = "github"
 

@@ -6,7 +6,6 @@
 // import Fluent
 // import Vapor
 
-
 // final class Token : Model {
 //     static let schema = Token.v20210601.schemaName
 
