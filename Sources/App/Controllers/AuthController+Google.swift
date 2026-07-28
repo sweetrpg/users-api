@@ -6,7 +6,6 @@
 // import ImperialGoogle
 // import Vapor
 
-
 // extension AuthController {
 //     static let googleAuthTypeId = "google"
 

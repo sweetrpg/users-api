@@ -6,10 +6,9 @@
 import Foundation
 import Vapor
 
-
 struct Constants {
-    static let apiPath: PathComponent = "api"
-    static let oauthLoginDataKey = "oauth_login"
-    static let serviceName = "profiles-api"
-    static let serviceIdBase = "profiles-api-"
+  static let apiPath: PathComponent = "api"
+  static let oauthLoginDataKey = "oauth_login"
+  static let serviceName = "users-api"
+  static let serviceIdBase = "users-api-"
 }

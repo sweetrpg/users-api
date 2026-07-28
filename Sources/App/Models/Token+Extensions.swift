@@ -6,7 +6,6 @@
 // import Fluent
 // import Vapor
 
-
 // extension Token {
 //     enum v20210616 {
 //         static let createdAt = FieldKey(stringLiteral: "createdAt")

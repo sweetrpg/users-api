@@ -4,7 +4,6 @@
 
 // import Fluent
 
-
 // struct SoftDeleteUser : Migration {
 //     func prepare(on database : Database) -> EventLoopFuture<()> {
 //         database.schema(User.v20210601.schemaName)
