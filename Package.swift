@@ -14,7 +14,7 @@ let package = Package(
             .package(url: "https://github.com/vapor/fluent.git", from: "4.0.0"),
             .package(url: "https://github.com/vapor/fluent-mongo-driver.git", from: "1.0.0"),
             // .package(url: "https://github.com/vapor/leaf.git", from: "4.0.0"),
-            .package(url: "https://github.com/vapor/jwt.git", from: "4.0.0"),
+            .package(url: "https://github.com/vapor/jwt.git", from: "5.1.2"),
             // .package(url: "https://github.com/vapor-community/Imperial.git", from: "1.0.0"),
             // .package(url: "https://github.com/vapor-community/sendgrid.git", from: "4.0.0"),
             .package(url: "https://github.com/vapor/redis.git", from: "4.0.0"),
