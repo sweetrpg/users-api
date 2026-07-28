@@ -4,7 +4,7 @@ import PackageDescription
 
 
 let package = Package(
-        name: "sweetrpg-profiles-api",
+        name: "sweetrpg-users-api",
         platforms: [
             .macOS(.v10_15),
         ],
