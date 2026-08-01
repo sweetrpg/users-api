@@ -1,0 +1,16 @@
+---
+apiVersion: v1
+kind: ConfigMap
+
+metadata:
+  name: api-env
+
+data:
+  ENV: local
+  PORT: "8080"
+  # Same shared Redis instance as the dev overlay - see that file's comment.
+  REDIS_HOST: redis.sweetrpg-support.svc.cluster.local
+  REDIS_PORT: "6379"
+  REDIS_DB: "3"
+  BUILD_INFO_PATH: /app/config/build-info.json
+  LOG_LEVEL: info
