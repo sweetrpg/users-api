@@ -43,9 +43,10 @@ bearer token. `admin-web` uses this exclusively - it never holds an Auth0 access
 outright, on the assumption that `admin-web`'s own `AuthRequiredMiddleware` already verified the
 acting user has the `admin` role before ever making the call - `RolesController` doesn't
 re-derive who the acting admin is. `INTERNAL_SERVICE_TOKEN` and `admin-web`'s
-`USERS_API_INTERNAL_SERVICE_TOKEN` must be the exact same value (same Akeyless secret, once
-deployment manifests exist for this repo - see tasks.md's Deployment group in the OpenSpec
-change).
+`USERS_API_INTERNAL_SERVICE_TOKEN` must be the exact same value - both sides' `kubernetes/`
+manifests pull from the one Akeyless path `/sweetrpg/admin/web/users-api` (see
+`kubernetes/overlays/dev/secrets.yaml`), so there is only one secret to rotate, not two that
+could drift apart.
 
 ### Audit logging (fail-closed, before and after)
 
@@ -61,6 +62,19 @@ Internal-service-token callers must also send `X-Acting-User-Sub` (the acting ad
 with 400 before touching the database if it's missing or empty, since the audit log needs to
 know who to attribute the action to. Auth0 bearer-token callers don't need this header; their
 own verified token's subject is used instead.
+
+## Deployment
+
+`kubernetes/` (base + `overlays/{dev,local}`) deploys this service into the `sweetrpg-user`
+namespace as `api-v1`, server-to-server only - no Ingress, since every caller (`auth-web`,
+`admin-web`, `users-web`) reaches it over in-cluster DNS
+(`api-v1.sweetrpg-user.svc.cluster.local:8080`), matching the pattern documented in
+`admin-web`'s own overlay comments for `ADMIN_API_URL`/`USERS_API_URL`. `DATABASE_URL`
+(MongoDB), `AUTH0_DOMAIN`/`AUTH0_AUDIENCE` (the one shared Auth0 application - see
+`auth-web`'s `AGENTS.md`), and `INTERNAL_SERVICE_TOKEN` all come from Akeyless via
+`ExternalSecret`s, not the configmap. `REDIS_DB` is `3` - this service's own Vapor session
+store, registered in `sweetrpg/platform`'s `docs/frontend-conventions.md`, unrelated to the
+suite-wide shared session on index 2 which this service never reads or writes.
 
 ## Committing Code
 

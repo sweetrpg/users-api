@@ -20,8 +20,13 @@ public func configure(_ app: Application) throws {
   app.logger.debug("DATABASE_URL: \(dbUrl)")
   try app.databases.use(.mongo(connectionString: dbUrl), as: .mongo)
 
-  let redisHostname = Environment.get("REDIS_HOSTNAME") ?? "localhost"
-  let redisConfig = try RedisConfiguration(hostname: redisHostname)
+  // DB index on the shared `redis.sweetrpg-support` instance - see sweetrpg/platform's
+  // docs/frontend-conventions.md "Shared sweetrpg-support Redis instance" registry before
+  // changing this index; it must match this service's row there.
+  let redisHost = Environment.get("REDIS_HOST") ?? "localhost"
+  let redisPort = Environment.get("REDIS_PORT").flatMap(Int.init) ?? 6379
+  let redisDB = Environment.get("REDIS_DB").flatMap(Int.init)
+  let redisConfig = try RedisConfiguration(hostname: redisHost, port: redisPort, database: redisDB)
   app.redis.configuration = redisConfig
 
   try migrations(app)
