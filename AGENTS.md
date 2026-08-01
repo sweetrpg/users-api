@@ -47,6 +47,21 @@ re-derive who the acting admin is. `INTERNAL_SERVICE_TOKEN` and `admin-web`'s
 deployment manifests exist for this repo - see tasks.md's Deployment group in the OpenSpec
 change).
 
+### Audit logging (fail-closed, before and after)
+
+Every mutating `/api/admin/*` route (`addRole`, `removeRole`, `addDenyEntry`,
+`removeDenyEntry`) writes an `AdminActionAuditLog` row via `RolesController.performAudited`
+before running the mutation, and updates that same row to `.succeeded`/`.failed` after. If the
+pre-action write itself fails, the mutation never runs - an admin action that can't be logged is
+not performed, no exceptions. The post-action update is best-effort (a failure there is logged
+as a warning but doesn't undo an action that already happened - the pre-write is the hard gate).
+
+Internal-service-token callers must also send `X-Acting-User-Sub` (the acting admin's Auth0
+`sub`, resolved by `admin-web` from the shared session) - `verifyAdminRole` rejects the request
+with 400 before touching the database if it's missing or empty, since the audit log needs to
+know who to attribute the action to. Auth0 bearer-token callers don't need this header; their
+own verified token's subject is used instead.
+
 ## Committing Code
 
 [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <description>`.
