@@ -23,12 +23,29 @@ any real consumer existed).
 
 ### Consumers
 
-- `users-web`: the admin-gated role/service-access management UI, and end-user profile/settings
-  pages.
-- `main-web`: calls `/authz/check` after Auth0 login to establish a session's verified roles.
-- `catalog-web`: has its own separate, unverified local Auth0 ID token decode for display
-  purposes only - retrofitting it to call this service is an explicit follow-up, not part of
-  this change.
+- `auth-web`: calls `/authz/check` once at login (bearer token from Auth0's token endpoint) to
+  establish a session's verified roles - the platform's sole caller of this endpoint with a real
+  end-user Auth0 token. See `sweetrpg/platform`'s `add-user-api-authn-authz` change for why login
+  itself lives in `auth-web`, not here.
+- `admin-web`: the admin-gated role/service-access management UI (`RolesController`'s
+  `/api/admin/*` routes) - see "Internal service auth" below for how it authenticates, since it
+  never holds an Auth0 token of its own.
+- `users-web`: end-user profile/settings pages only, not the admin UI (that moved to `admin-web`
+  partway through the `add-user-api-authn-authz` change - an earlier design had it here).
+
+### Internal service auth (`admin-web` → `RolesController`)
+
+`RolesController`'s `/api/admin/*` routes accept `X-Internal-Service-Token` (matching the
+`INTERNAL_SERVICE_TOKEN` env var, see `InternalServiceAuth.swift`) as an alternative to an Auth0
+bearer token. `admin-web` uses this exclusively - it never holds an Auth0 access token (it reads
+`auth-web`'s shared session instead), so it can't present one to `/authz/check`'s or
+`RolesController`'s usual bearer-token path. Whoever holds this shared secret is trusted
+outright, on the assumption that `admin-web`'s own `AuthRequiredMiddleware` already verified the
+acting user has the `admin` role before ever making the call - `RolesController` doesn't
+re-derive who the acting admin is. `INTERNAL_SERVICE_TOKEN` and `admin-web`'s
+`USERS_API_INTERNAL_SERVICE_TOKEN` must be the exact same value (same Akeyless secret, once
+deployment manifests exist for this repo - see tasks.md's Deployment group in the OpenSpec
+change).
 
 ## Committing Code
 

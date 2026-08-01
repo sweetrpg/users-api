@@ -211,7 +211,14 @@ struct RolesController: RouteCollection {
     }
   }
 
+  /// Trusts a valid `X-Internal-Service-Token` outright (see `InternalServiceAuth.swift` for
+  /// why `admin-web` uses this instead of an Auth0 bearer token), otherwise falls through to
+  /// verifying an Auth0 bearer token's `admin` role as before.
   private func verifyAdminRole(req: Request) -> EventLoopFuture<Void> {
+    if req.hasValidInternalServiceToken {
+      return req.eventLoop.makeSucceededVoidFuture()
+    }
+
     guard let token = req.headers.bearerAuthorization?.token else {
       return req.eventLoop.makeFailedFuture(Abort(.unauthorized))
     }
