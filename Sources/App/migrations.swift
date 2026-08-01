@@ -11,6 +11,7 @@ public func migrations(_ app: Application) throws {
   app.migrations.add(CreateSettingsItemTable())
   app.migrations.add(CreateUserRoleTable())
   app.migrations.add(CreateServiceDenyEntryTable())
+  app.migrations.add(CreateAdminActionAuditLogTable())
   // app.migrations.add(CreateTokenTable())
   app.migrations.add(SeedDatabase())
   // app.migrations.add(AddTwitterHandle())
