@@ -26,7 +26,11 @@ RUN useradd --user-group --create-home --system --skel /dev/null $USERNAME
 WORKDIR /app
 
 RUN mkdir -p /app/bin /app/config
-COPY --from=builder /build/.build/release/App /app/bin/
+# Package.swift's executable target is named "Run" (Sources/Run/main.swift), not "App" -
+# "App" is the library target (Sources/App). Every Docker Build run since v0.1.0 has failed
+# at this COPY step because the built binary at .build/release/Run was never at the path
+# this line assumed.
+COPY --from=builder /build/.build/release/Run /app/bin/
 
 RUN echo "{\"number\":\"${BUILD_NUMBER}\",\"job\":\"${BUILD_JOB}\",\"sha\":\"${BUILD_SHA}\",\"date\":\"${BUILD_DATE}\",\"version\":\"${BUILD_VERSION}\"}" > /app/config/build-info.json
 RUN chown -R ${USERNAME}:${USERNAME} /app
@@ -40,5 +44,5 @@ EXPOSE 8080
 
 USER ${USERNAME}
 
-ENTRYPOINT ["/app/bin/App"]
+ENTRYPOINT ["/app/bin/Run"]
 CMD ["serve"]
