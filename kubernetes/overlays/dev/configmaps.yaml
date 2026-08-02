@@ -8,11 +8,10 @@ metadata:
 data:
   ENV: dev
   PORT: "8080"
-  # Own Vapor session store, distinct from the suite-wide shared session on index 2 - see
-  # docs/frontend-conventions.md's "Shared sweetrpg-support Redis instance" registry
-  # (sweetrpg/platform) before changing this index.
-  REDIS_HOST: redis.sweetrpg-support.svc.cluster.local
+  # This service's own dedicated Redis instance in sweetrpg-users - its own Vapor session store,
+  # distinct from and unrelated to auth-web's suite-wide shared session in sweetrpg-auth. See
+  # docs/frontend-conventions.md's "Per-namespace Redis instances" registry (sweetrpg/platform).
+  REDIS_HOST: redis.sweetrpg-users.svc.cluster.local
   REDIS_PORT: "6379"
-  REDIS_DB: "3"
   BUILD_INFO_PATH: /app/config/build-info.json
   LOG_LEVEL: info
