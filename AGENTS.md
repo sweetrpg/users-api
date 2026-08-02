@@ -65,16 +65,17 @@ own verified token's subject is used instead.
 
 ## Deployment
 
-`kubernetes/` (base + `overlays/{dev,local}`) deploys this service into the `sweetrpg-user`
+`kubernetes/` (base + `overlays/{dev,local}`) deploys this service into the `sweetrpg-users`
 namespace as `api-v1`, server-to-server only - no Ingress, since every caller (`auth-web`,
 `admin-web`, `users-web`) reaches it over in-cluster DNS
-(`api-v1.sweetrpg-user.svc.cluster.local:8080`), matching the pattern documented in
+(`api-v1.sweetrpg-users.svc.cluster.local:8080`), matching the pattern documented in
 `admin-web`'s own overlay comments for `ADMIN_API_URL`/`USERS_API_URL`. `DATABASE_URL`
 (MongoDB), `AUTH0_DOMAIN`/`AUTH0_AUDIENCE` (the one shared Auth0 application - see
 `auth-web`'s `AGENTS.md`), and `INTERNAL_SERVICE_TOKEN` all come from Akeyless via
-`ExternalSecret`s, not the configmap. `REDIS_DB` is `3` - this service's own Vapor session
-store, registered in `sweetrpg/platform`'s `docs/frontend-conventions.md`, unrelated to the
-suite-wide shared session on index 2 which this service never reads or writes.
+`ExternalSecret`s, not the configmap. This service's own dedicated Redis instance
+(`redis.sweetrpg-users.svc.cluster.local`) is its own Vapor session store, registered in
+`sweetrpg/platform`'s `docs/frontend-conventions.md`, unrelated to auth-web's suite-wide shared
+session in `sweetrpg-auth`, which this service never reads or writes.
 
 ## Committing Code
 
