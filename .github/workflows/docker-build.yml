@@ -6,6 +6,8 @@ on:
     push:
         tags:
             - "v*"
+        branches:
+            - develop
     workflow_dispatch:
 
 permissions:
@@ -48,6 +50,7 @@ jobs:
                       type=raw,value=${{ steps.previoustag.outputs.tag }}
                       type=raw,value=${{ steps.getbuilddate.outputs.tagdate }}
                       type=ref,event=tag
+                      type=ref,event=branch
                       type=semver,pattern={{version}}
                       type=semver,pattern={{major}}.{{minor}}
                       type=semver,pattern={{major}}

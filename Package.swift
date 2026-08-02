@@ -56,4 +56,3 @@ let package = Package(
 // Stripe
 // Auth0
 // APM (NewRelic?)
-// Sentry?

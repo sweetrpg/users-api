@@ -12,6 +12,8 @@ import Vapor
 public func configure(_ app: Application) throws {
   app.logger.logLevel = app.environment == .development ? .debug : .info
 
+  app.middleware.use(SentryMiddleware())
+
   app.middleware.use(app.sessions.middleware)
 
   guard let dbUrl = Environment.get("DATABASE_URL") else {
