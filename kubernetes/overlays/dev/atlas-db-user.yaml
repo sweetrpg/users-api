@@ -9,7 +9,7 @@ metadata:
   name: users-api
 
 spec:
-  databaseName: users
+  databaseName: sweetrpg-users
   username: users-api
   passwordSecretRef:
     name: users-api-db-credentials
@@ -17,7 +17,7 @@ spec:
     name: sweetrpg
     namespace: sweetrpg-db
   roles:
-    - databaseName: users
+    - databaseName: sweetrpg-users
       roleName: readWrite
   x509Type: NONE
 
