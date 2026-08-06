@@ -12,5 +12,5 @@ spec:
   # though this app doesn't implement versioning of its own yet.
   stripPrefix:
     prefixes:
-      - /api/users/0
-      - /api/users/1
+      - /api/0/users
+      - /api/1/users
