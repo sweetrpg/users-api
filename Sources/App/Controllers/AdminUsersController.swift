@@ -9,15 +9,20 @@ import Vapor
 struct UserIdentity: Content {
   let id: UUID
   let email: String
+  /// The Auth0 `sub` this user last logged in with (from `LoginProfile`), the key `auth-api`'s
+  /// role/deny-entry data is stored under - `nil` if this user has no Auth0 `LoginProfile` yet
+  /// (shouldn't happen in practice since Auth0 is the platform's sole login mechanism, but not
+  /// guaranteed by the schema). `admin-web` composes against `auth-api` using this field, not
+  /// `id` - see `sweetrpg/platform`'s `split-authz-into-auth-api` change design.md.
+  let subject: String?
 }
 
-/// Minimal id/email listing for `admin-web`'s role/service-access management UI to compose
-/// against `auth-api`'s role/deny-entry data, keyed by Auth0 subject on `auth-api`'s side and by
-/// `LoginProfile` here (`sweetrpg/platform`'s `split-authz-into-auth-api` change design.md's
-/// "Admin listing is composed in admin-web" decision - `auth-api` holds no profile data, so it
-/// can't serve this itself). Deliberately narrower than the `RolesController.listUsers`/`getUser`
-/// endpoints that used to live here (which also returned roles/denials) - this only ever returns
-/// identity, never authorization data.
+/// Minimal id/email/subject listing for `admin-web`'s role/service-access management UI to
+/// compose against `auth-api`'s role/deny-entry data (`auth-api` holds no profile data, so it
+/// can't serve this itself - see the "Admin listing is composed in admin-web" design decision).
+/// Deliberately narrower than the `RolesController.listUsers`/`getUser` endpoints that used to
+/// live here (which also returned roles/denials) - this only ever returns identity, never
+/// authorization data.
 struct AdminUsersController: RouteCollection {
   static let endpointPath: PathComponent = "admin"
 
@@ -32,10 +37,18 @@ struct AdminUsersController: RouteCollection {
     }
     return User.query(on: req.db)
       .all()
-      .flatMapThrowing { users in
-        try users.map { user in
+      .and(
+        LoginProfile.query(on: req.db)
+          .filter(\.$thirdPartyAuth == "auth0")
+          .all()
+      )
+      .flatMapThrowing { users, loginProfiles in
+        let subjectsByUserId = Dictionary(
+          loginProfiles.map { ($0.$user.id, $0.thirdPartyAuthId) },
+          uniquingKeysWith: { first, _ in first })
+        return try users.map { user in
           guard let id = user.id else { throw Abort(.internalServerError) }
-          return UserIdentity(id: id, email: user.email)
+          return UserIdentity(id: id, email: user.email, subject: subjectsByUserId[id])
         }
       }
   }
