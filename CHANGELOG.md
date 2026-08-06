@@ -1,3 +1,27 @@
+## [0.3.0] - 2026-08-06
+
+### 🚀 Features
+
+- Add ingress for service in local
+- Move authz to auth-api; add minimal admin user listing
+
+### 🐛 Bug Fixes
+
+- Update ingress setup
+- *(kubernetes)* Mount redis-auth secret so REDIS_PASS reaches the app
+- *(ci)* Correct sweetrpg/kubernetes manifest path for update-deployment
+- Database name and add missing DB vars
+- Include Auth0 subject in admin user identity listing
+- *(kubernetes)* Version-prefixed Ingress paths with a latest-alias Service
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.2.0
+- *(kubernetes)* Rename namespace sweetrpg-user -> sweetrpg-users, own Redis
+- Update middleware name
+- Add pod monitor
+- Update ingress name
+- Add Atlas DB user manifest
 ## [0.2.0] - 2026-08-02
 
 ### 🚀 Features

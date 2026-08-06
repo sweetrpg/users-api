@@ -1,0 +1,16 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+
+metadata:
+  name: strip-prefix-api
+
+spec:
+  # users-api's own routes aren't version-prefixed internally - list both
+  # exact /api/users/0 and /api/users/1 so either external version segment strips cleanly to
+  # the app's real unprefixed routes, matching catalog-api's strip-prefix-v1 convention even
+  # though this app doesn't implement versioning of its own yet.
+  stripPrefix:
+    prefixes:
+      - /api/0/users
+      - /api/1/users
