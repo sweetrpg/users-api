@@ -5,12 +5,14 @@ namespace: sweetrpg-users
 
 resources:
     - ../../base
-    - configmaps.yaml
-    - secrets.yaml
-    - middlewares.yaml
-    - ingress.yaml
     - atlas-db-user.yaml
+    - configmaps.yaml
+    - ingress.yaml
+    - middlewares.yaml
     - pod-monitor.yaml
+    - secrets/db-creds.yaml
+    - secrets/db.yaml
+    - secrets/misc.yaml
 
 labels:
     - pairs:
@@ -22,8 +24,3 @@ labels:
 
 generatorOptions:
     disableNameSuffixHash: true
-
-images:
-    - name: users-api
-      newName: ghcr.io/sweetrpg/users-api
-      newTag: latest

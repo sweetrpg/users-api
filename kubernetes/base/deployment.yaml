@@ -44,10 +44,8 @@ spec:
                             name: api-db
                       - secretRef:
                             name: api-misc
-                      - secretRef:
-                            name: redis-auth
                   ports:
-                      - containerPort: 8080
+                      - containerPort: 8000
                         name: http
                   resources:
                       requests:

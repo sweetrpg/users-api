@@ -1,0 +1,110 @@
+definitions:
+  models.UserIdentity:
+    properties:
+      email:
+        type: string
+      id:
+        type: string
+      subject:
+        type: string
+    type: object
+  vo.ErrorVO:
+    properties:
+      error:
+        type: string
+      message:
+        type: string
+    type: object
+  vo.HealthResponseVO:
+    properties:
+      collections:
+        items:
+          type: string
+        type: array
+      database:
+        type: string
+      errors:
+        type: integer
+      messages:
+        items:
+          type: string
+        type: array
+      ping:
+        type: string
+    type: object
+  vo.PingResponseVO:
+    properties:
+      date:
+        type: string
+      hostname:
+        type: string
+    type: object
+info:
+  contact:
+    email: admin@sweetrpg.com
+    name: API Support
+    url: https://sweetrpg.com
+  description: Swagger APIs
+  license:
+    name: MIT
+    url: https://mit-license.org/
+  termsOfService: https://pilgrimagesoftware.com/terms/
+  title: Users API service
+  version: "1.0"
+paths:
+  /api/admin/users:
+    get:
+      description: List user identities
+      parameters:
+      - description: Shared internal-service secret
+        in: header
+        name: X-Internal-Service-Token
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.UserIdentity'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: List user identities
+      tags:
+      - admin
+  /status/health:
+    get:
+      description: Health check
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/vo.HealthResponseVO'
+      summary: Health check
+      tags:
+      - status
+  /status/ping:
+    get:
+      description: Ping
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/vo.PingResponseVO'
+      summary: Ping
+      tags:
+      - status
+swagger: "2.0"

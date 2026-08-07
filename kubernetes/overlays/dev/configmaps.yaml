@@ -15,11 +15,6 @@ data:
   DB_USER: users-api
   DB_NAME: sweetrpg-users
   DB_OPTS: retryWrites=true&w=majority
-  PORT: "8080"
-  # This service's own dedicated Redis instance in sweetrpg-users - its own Vapor session store,
-  # distinct from and unrelated to auth-web's suite-wide shared session in sweetrpg-auth. See
-  # docs/frontend-conventions.md's "Per-namespace Redis instances" registry (sweetrpg/platform).
-  REDIS_HOST: redis.sweetrpg-users.svc.cluster.local
-  REDIS_PORT: "6379"
+  PORT: "8000"
   BUILD_INFO_PATH: /app/config/build-info.json
   LOG_LEVEL: info

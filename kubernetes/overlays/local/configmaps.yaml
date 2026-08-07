@@ -7,9 +7,6 @@ metadata:
 
 data:
   ENV: local
-  PORT: "8080"
-  # This service's own dedicated Redis instance - see the dev overlay's comment.
-  REDIS_HOST: redis.sweetrpg-users.svc.cluster.local
-  REDIS_PORT: "6379"
+  PORT: "8000"
   BUILD_INFO_PATH: /app/config/build-info.json
   LOG_LEVEL: info
