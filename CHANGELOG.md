@@ -1,3 +1,13 @@
+## [0.3.2] - 2026-08-07
+
+### 🐛 Bug Fixes
+
+- Secret setup for Atlas
+- *(kubernetes)* Build MongoDB connection string from component parts
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.3.1
 ## [0.3.1] - 2026-08-07
 
 ### 🐛 Bug Fixes
