@@ -9,7 +9,7 @@ metadata:
   name: users-api
 
 spec:
-  databaseName: sweetrpg-users
+  databaseName: admin
   username: users-api
   passwordSecretRef:
     name: users-api-db-credentials

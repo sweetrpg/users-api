@@ -1,3 +1,14 @@
+## [0.3.4] - 2026-08-07
+
+### 🐛 Bug Fixes
+
+- *(kubernetes)* Scope users-api Atlas role to its own database
+- *(kubernetes)* Scope AtlasDatabaseUser role to sweetrpg-users
+- *(kubernetes)* Authenticate AtlasDatabaseUser against admin, not app db
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.3.3
 ## [0.3.3] - 2026-08-07
 
 ### 🐛 Bug Fixes
