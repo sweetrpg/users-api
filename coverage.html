@@ -1,0 +1,779 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>users-api: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/sweetrpg/users-api/cmd/users-api/main.go (0.0%)</option>
+				
+				<option value="file1">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
+				
+				<option value="file2">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
+				
+				<option value="file3">github.com/sweetrpg/users-api/server/admin_users.go (62.5%)</option>
+				
+				<option value="file4">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				
+				<option value="file5">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">no coverage</span>
+				<span class="cov1">low coverage</span>
+				<span class="cov2">*</span>
+				<span class="cov3">*</span>
+				<span class="cov4">*</span>
+				<span class="cov5">*</span>
+				<span class="cov6">*</span>
+				<span class="cov7">*</span>
+				<span class="cov8">*</span>
+				<span class="cov9">*</span>
+				<span class="cov10">high coverage</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "log"
+        "log/slog"
+        "os"
+        "strconv"
+        "strings"
+        "time"
+
+        "github.com/getsentry/sentry-go"
+        "github.com/gin-contrib/cors"
+        "github.com/gin-gonic/gin"
+        "github.com/grafana/pyroscope-go"
+        "github.com/joho/godotenv"
+        "github.com/penglongli/gin-metrics/ginmetrics"
+        sloggin "github.com/samber/slog-gin"
+        actuator "github.com/sinhashubham95/go-actuator"
+        swaggerfiles "github.com/swaggo/files"
+        ginSwagger "github.com/swaggo/gin-swagger"
+        apiconstants "github.com/sweetrpg/api-core.go/constants"
+        "github.com/sweetrpg/api-core.go/tracing"
+        "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/common.go/util"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "github.com/sweetrpg/users-api/docs"
+        "github.com/sweetrpg/users-api/server"
+        "go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+        "golang.org/x/time/rate"
+)
+
+// @title Users API service
+// @version 1.0
+// @description Swagger APIs
+// @termsOfService https://pilgrimagesoftware.com/terms/
+// @contact.name API Support
+// @contact.url https://sweetrpg.com
+// @contact.email admin@sweetrpg.com
+// @license.name MIT
+// @license.url https://mit-license.org/
+func main() <span class="cov0" title="0">{
+        _ = godotenv.Load(".env")
+
+        logging.Init()
+
+        setupSentry()
+
+        if stopProfiling := setupProfiling(); stopProfiling != nil </span><span class="cov0" title="0">{
+                defer stopProfiling()
+        }</span>
+
+        <span class="cov0" title="0">httpLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+        r := gin.New()
+        r.Use(sloggin.New(httpLogger))
+        r.Use(gin.Recovery())
+
+        setupTracing(r)
+        defer tracing.TeardownTracing()
+
+        setupCORS(r)
+
+        checkInternalServiceTokenConfig()
+
+        setupMetrics(r)
+
+        database.SetupDatabase()
+        defer database.TeardownDatabase()
+
+        setupAcuator(r)
+
+        setupSwagger(r)
+
+        r.Use(RateLimiter())
+
+        server.SetupHandlers(r)
+
+        _ = r.Run(util.GetEnv(apiconstants.BIND_ADDRESS, ":8000"))</span>
+}
+
+func setupSwagger(r *gin.Engine) <span class="cov0" title="0">{
+        logging.Logger.Info("Setting up Swagger...")
+
+        docs.SwaggerInfo.Version = os.Getenv(apiconstants.VERSION)
+        docs.SwaggerInfo.Host = util.GetEnv(apiconstants.INGRESS_HOST, "localhost")
+        docs.SwaggerInfo.BasePath = util.GetEnv(apiconstants.INGRESS_BASE_PATH, "/")
+        docs.SwaggerInfo.Schemes = strings.Split(util.GetEnv(apiconstants.INGRESS_SCHEMES, "http"), ",")
+        r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
+}</span>
+
+// checkInternalServiceTokenConfig warns at startup if INTERNAL_SERVICE_TOKEN
+// is unset, since that permanently disables GET /api/admin/users (every
+// request falls through to a 401) rather than silently trusting an empty
+// token.
+func checkInternalServiceTokenConfig() <span class="cov0" title="0">{
+        if util.GetEnv(constants.INTERNAL_SERVICE_TOKEN, "") == "" </span><span class="cov0" title="0">{
+                logging.Logger.Warn("INTERNAL_SERVICE_TOKEN not set, GET /api/admin/users will reject every request with 401")
+        }</span>
+}
+
+func setupCORS(r *gin.Engine) <span class="cov0" title="0">{
+        logging.Logger.Info("Setting up CORS...")
+
+        origins := util.GetEnv(constants.ALLOWED_ORIGINS, "")
+        if origins == "" </span><span class="cov0" title="0">{
+                logging.Logger.Warn("ALLOWED_ORIGINS not set, no cross-origin requests will be allowed")
+                return
+        }</span>
+
+        <span class="cov0" title="0">r.Use(cors.New(cors.Config{
+                AllowOrigins:     strings.Split(origins, ","),
+                AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+                AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+                AllowCredentials: true,
+                MaxAge:           12 * time.Hour,
+        }))</span>
+}
+
+func setupSentry() <span class="cov0" title="0">{
+        logging.Logger.Info("Setting up Sentry...")
+
+        sentryDsn, found := os.LookupEnv(apiconstants.SENTRY_DSN)
+        if found </span><span class="cov0" title="0">{
+                sentryDebug, _ := strconv.ParseBool(util.GetEnv(apiconstants.SENTRY_DEBUG, "false"))
+                err := sentry.Init(sentry.ClientOptions{
+                        Dsn:              sentryDsn,
+                        Debug:            sentryDebug,
+                        AttachStacktrace: true,
+                        EnableTracing:    true,
+                        TracesSampleRate: 1.0,
+                        TracesSampler: sentry.TracesSampler(func(ctx sentry.SamplingContext) float64 </span><span class="cov0" title="0">{
+                                if strings.Contains(ctx.Span.Name, "/status/") </span><span class="cov0" title="0">{
+                                        return 0.0
+                                }</span>
+                                <span class="cov0" title="0">return 1.0</span>
+                        }),
+                        ServerName: constants.ServiceName,
+                })
+                <span class="cov0" title="0">if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Error while trying to initialize Sentry", "error", err.Error())
+                }</span>
+                <span class="cov0" title="0">defer func() </span><span class="cov0" title="0">{
+                        log.Print("Flushing Sentry...")
+                        sentry.Flush(2 * time.Second)
+                }</span>()
+        }
+}
+
+func setupProfiling() func() <span class="cov0" title="0">{
+        logging.Logger.Info("Setting up continuous profiling...")
+
+        serverAddress, found := os.LookupEnv(constants.PYROSCOPE_SERVER_ADDRESS)
+        if !found </span><span class="cov0" title="0">{
+                logging.Logger.Warn("PYROSCOPE_SERVER_ADDRESS not set, continuous profiling disabled")
+                return nil
+        }</span>
+
+        <span class="cov0" title="0">profiler, err := pyroscope.Start(pyroscope.Config{
+                ApplicationName: constants.ServiceName,
+                ServerAddress:   serverAddress,
+                TenantID:        util.GetEnv(constants.PYROSCOPE_TENANT_ID, ""),
+                Tags: map[string]string{
+                        "env": util.GetEnv(apiconstants.ENV, "dev"),
+                },
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("Error while trying to initialize continuous profiling", "error", err.Error())
+                return nil
+        }</span>
+
+        <span class="cov0" title="0">return func() </span><span class="cov0" title="0">{
+                _ = profiler.Stop()
+        }</span>
+}
+
+func setupAcuator(r *gin.Engine) <span class="cov0" title="0">{
+        logging.Logger.Info("Setting up actuator...")
+
+        actuatorHandler := actuator.GetActuatorHandler(&amp;actuator.Config{
+                Endpoints: []int{
+                        actuator.Env,
+                        actuator.Info,
+                        actuator.Metrics,
+                        actuator.Ping,
+                        actuator.ThreadDump,
+                },
+                Env:     util.GetEnv(apiconstants.ENV, "dev"),
+                Name:    constants.ServiceName,
+                Port:    util.GetEnvInt(apiconstants.PORT, 0),
+                Version: util.GetEnv(apiconstants.VERSION, "v0.0.0"),
+        })
+        ginActuatorHandler := func(ctx *gin.Context) </span><span class="cov0" title="0">{
+                actuatorHandler(ctx.Writer, ctx.Request)
+        }</span>
+        <span class="cov0" title="0">r.GET("/actuator/*endpoint", ginActuatorHandler)</span>
+}
+
+func setupTracing(r *gin.Engine) <span class="cov0" title="0">{
+        logging.Logger.Info("Setting up tracing...")
+
+        // Teardown is deferred by the caller (main), not here - deferring it in this function
+        // would run it as soon as this function returns, shutting down the tracer provider
+        // before the server ever serves a request, silently dropping every span.
+        tracing.SetupTracing(constants.ServiceName)
+        r.Use(otelgin.Middleware(constants.ServiceName))
+}</span>
+
+func setupMetrics(r *gin.Engine) <span class="cov0" title="0">{
+        logging.Logger.Info("Setting up metrics endpoint...")
+
+        m := ginmetrics.GetMonitor()
+        m.SetMetricPath("/metrics")
+        m.SetSlowTime(10)
+        m.SetDuration([]float64{0.1, 0.3, 1.2, 5, 10})
+        m.Use(r)
+}</span>
+
+func RateLimiter() gin.HandlerFunc <span class="cov0" title="0">{
+        limiter := rate.NewLimiter(1, util.GetEnvInt(apiconstants.RATE_LIMIT, 10))
+
+        return func(c *gin.Context) </span><span class="cov0" title="0">{
+                if limiter.Allow() </span><span class="cov0" title="0">{
+                        c.Next()
+                }</span> else<span class="cov0" title="0"> {
+                        logging.Logger.Warn("Rate limit exceeded")
+                        c.JSON(429, vo.ErrorVO{
+                                Error:   apiconstants.ErrorRateLimited,
+                                Message: "Limit exceeded",
+                        })
+                }</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">// Package docs Code generated by swaggo/swag. DO NOT EDIT
+package docs
+
+import "github.com/swaggo/swag"
+
+const docTemplate = `{
+    "schemes": {{ marshal .Schemes }},
+    "swagger": "2.0",
+    "info": {
+        "description": "{{escape .Description}}",
+        "title": "{{.Title}}",
+        "termsOfService": "https://pilgrimagesoftware.com/terms/",
+        "contact": {
+            "name": "API Support",
+            "url": "https://sweetrpg.com",
+            "email": "admin@sweetrpg.com"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://mit-license.org/"
+        },
+        "version": "{{.Version}}"
+    },
+    "host": "{{.Host}}",
+    "basePath": "{{.BasePath}}",
+    "paths": {
+        "/api/admin/users": {
+            "get": {
+                "description": "List user identities",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List user identities",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Shared internal-service secret",
+                        "name": "X-Internal-Service-Token",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.UserIdentity"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
+        "/status/health": {
+            "get": {
+                "description": "Health check",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "status"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/vo.HealthResponseVO"
+                        }
+                    }
+                }
+            }
+        },
+        "/status/ping": {
+            "get": {
+                "description": "Ping",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "status"
+                ],
+                "summary": "Ping",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/vo.PingResponseVO"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "models.UserIdentity": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                }
+            }
+        },
+        "vo.ErrorVO": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "vo.HealthResponseVO": {
+            "type": "object",
+            "properties": {
+                "collections": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "database": {
+                    "type": "string"
+                },
+                "errors": {
+                    "type": "integer"
+                },
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "ping": {
+                    "type": "string"
+                }
+            }
+        },
+        "vo.PingResponseVO": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string"
+                },
+                "hostname": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}`
+
+// SwaggerInfo holds exported Swagger Info so clients can modify it
+var SwaggerInfo = &amp;swag.Spec{
+        Version:          "1.0",
+        Host:             "",
+        BasePath:         "",
+        Schemes:          []string{},
+        Title:            "Users API service",
+        Description:      "Swagger APIs",
+        InfoInstanceName: "swagger",
+        SwaggerTemplate:  docTemplate,
+        LeftDelim:        "{{",
+        RightDelim:       "}}",
+}
+
+func init() <span class="cov0" title="0">{
+        swag.Register(SwaggerInfo.InstanceName(), SwaggerInfo)
+}</span>
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">// Package models defines the persisted document shapes for users-api and the
+// derived views built from them.
+package models
+
+import (
+        "context"
+
+        "github.com/google/uuid"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+)
+
+// notSoftDeletedFilter matches documents whose deletedAt field is either
+// absent or explicitly null, mirroring Fluent's automatic exclusion of
+// soft-deleted rows (a @Timestamp(on: .delete) field) from an unqualified
+// .all() query. Both collections use the same soft-delete convention.
+var notSoftDeletedFilter = bson.D{
+        {Key: "$or", Value: bson.A{
+                bson.D{{Key: "deletedAt", Value: bson.D{{Key: "$exists", Value: false}}}},
+                bson.D{{Key: "deletedAt", Value: nil}},
+        }},
+}
+
+// userDoc is the users collection document shape, unchanged from the Swift
+// service's Fluent schema (UserModel.User).
+type userDoc struct {
+        ID    uuid.UUID `bson:"_id"`
+        Name  string    `bson:"name"`
+        Email string    `bson:"email"`
+}
+
+// loginProfileDoc is the login_profiles collection document shape, unchanged
+// from the Swift service's Fluent schema (UserModel.LoginProfile).
+type loginProfileDoc struct {
+        ID               uuid.UUID `bson:"_id"`
+        UserID           uuid.UUID `bson:"userId"`
+        ThirdPartyAuth   string    `bson:"thirdPartyAuth"`
+        ThirdPartyAuthID string    `bson:"thirdPartyAuthId"`
+}
+
+// UserIdentity is a minimal id/email/subject listing for admin-web's
+// role/service-access management UI to compose against auth-api's
+// role/deny-entry data (auth-api holds no profile data, so it can't serve
+// this itself). Deliberately narrower than the roles/denials listing that
+// used to live in users-api before the auth-api split - this only ever
+// returns identity, never authorization data. Subject is omitted from the
+// JSON response (not null) when the user has no Auth0 login profile yet,
+// matching the Swift service's synthesized Codable encoding of an Optional
+// property.
+type UserIdentity struct {
+        ID      uuid.UUID `json:"id"`
+        Email   string    `json:"email"`
+        Subject *string   `json:"subject,omitempty"`
+}
+
+// ListUserIdentities returns every non-soft-deleted user's id/email, paired
+// with the Auth0 subject from their login profile if one exists - the same
+// join AdminUsersController.listUsers performed in Fluent.
+func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) <span class="cov0" title="0">{
+        users, err := database.Query[userDoc](constants.UsersCollection, notSoftDeletedFilter, nil, nil, 0, 0)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">profiles, err := database.Query[loginProfileDoc](constants.LoginProfilesCollection, bson.D{
+                {Key: "$and", Value: bson.A{
+                        notSoftDeletedFilter,
+                        bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
+                }},
+        }, nil, nil, 0, 0)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">subjectsByUserID := make(map[uuid.UUID]string, len(profiles))
+        for _, p := range profiles </span><span class="cov0" title="0">{
+                if _, exists := subjectsByUserID[p.UserID]; !exists </span><span class="cov0" title="0">{
+                        subjectsByUserID[p.UserID] = p.ThirdPartyAuthID
+                }</span>
+        }
+
+        <span class="cov0" title="0">identities := make([]UserIdentity, 0, len(users))
+        for _, u := range users </span><span class="cov0" title="0">{
+                identity := UserIdentity{ID: u.ID, Email: u.Email}
+                if subject, ok := subjectsByUserID[u.ID]; ok </span><span class="cov0" title="0">{
+                        identity.Subject = &amp;subject
+                }</span>
+                <span class="cov0" title="0">identities = append(identities, identity)</span>
+        }
+        <span class="cov0" title="0">return identities, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package server
+
+import (
+        "crypto/subtle"
+        "net/http"
+
+        "github.com/gin-gonic/gin"
+        apiv "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/common.go/util"
+        "github.com/sweetrpg/users-api/constants"
+        "github.com/sweetrpg/users-api/models"
+)
+
+const internalServiceTokenHeader = "X-Internal-Service-Token"
+
+func setupAdminUsersHandlers(g *gin.Engine) <span class="cov6" title="2">{
+        logging.Logger.Info("Setting up admin users endpoint handlers...")
+
+        g.GET("/api/admin/users", listUsers)
+}</span>
+
+// hasValidInternalServiceToken reports whether the request presented the
+// correct X-Internal-Service-Token header, compared constant-time against
+// INTERNAL_SERVICE_TOKEN. Always false when INTERNAL_SERVICE_TOKEN is unset -
+// the internal-auth path is then permanently disabled rather than trusting an
+// empty token, matching the Swift service's InternalServiceAuth contract.
+// Unlike admin-api's WriteAuth, this route is read-only and not audited, so
+// it does not require an X-Acting-User-Sub header.
+func hasValidInternalServiceToken(c *gin.Context) bool <span class="cov10" title="3">{
+        expected := util.GetEnv(constants.INTERNAL_SERVICE_TOKEN, "")
+        if expected == "" </span><span class="cov1" title="1">{
+                return false
+        }</span>
+        <span class="cov6" title="2">presented := c.GetHeader(internalServiceTokenHeader)
+        return subtle.ConstantTimeCompare([]byte(expected), []byte(presented)) == 1</span>
+}
+
+// List user identities.
+//
+//         Minimal id/email/subject listing for admin-web's role/service-access management UI to compose against auth-api's role/deny-entry data. Requires the internal service token.
+//                @Summary                List user identities
+//                @Description        List user identities
+//                @Tags                        admin
+//                @Produce                json
+//                @Param                        X-Internal-Service-Token        header        string        true        "Shared internal-service secret"
+//                @Success                200                {array}                models.UserIdentity
+//                @Failure                401                {object}        apiv.ErrorVO
+//                @Failure                500                {object}        apiv.ErrorVO
+//                @Router                        /api/admin/users [get]
+func listUsers(c *gin.Context) <span class="cov10" title="3">{
+        if !hasValidInternalServiceToken(c) </span><span class="cov10" title="3">{
+                c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid internal service credentials"})
+                return
+        }</span>
+
+        <span class="cov0" title="0">identities, err := models.ListUserIdentities(c.Request.Context())
+        if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("Failed to list user identities", "error", err.Error())
+                c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to list users"})
+                return
+        }</span>
+
+        <span class="cov0" title="0">c.JSON(http.StatusOK, identities)</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package server
+
+import (
+        "github.com/gin-gonic/gin"
+)
+
+func SetupHandlers(g *gin.Engine) <span class="cov0" title="0">{
+        setupAdminUsersHandlers(g)
+        setupStatusHandlers(g)
+}</span>
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">package server
+
+import (
+        "net/http"
+
+        "github.com/gin-gonic/gin"
+        apicores "github.com/sweetrpg/api-core.go/server"
+        _ "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+)
+
+func setupStatusHandlers(g *gin.Engine) <span class="cov0" title="0">{
+        logging.Logger.Info("Setting up status endpoint handlers...")
+
+        </span><span class="cov0" title="0">{
+                a := g.Group("/status")
+                a.GET("/health", healthHandler)
+        }</span>
+
+        <span class="cov0" title="0">g.GET("/status/ping", pingHandler)</span>
+}
+
+// Health check.
+//
+//         Do a health check of the application and its dependencies and return the results
+//                @Summary                Health check
+//                @Description        Health check
+//                @Tags                        status
+//                @Produce                json
+//                @Success                200                {object}        vo.HealthResponseVO
+//                @Router                        /status/health [get]
+func healthHandler(c *gin.Context) <span class="cov0" title="0">{
+        resp := apicores.HealthHandler(c.Request.Context())
+        status := http.StatusOK
+        if resp.Errors &gt; 0 </span><span class="cov0" title="0">{
+                status = http.StatusServiceUnavailable
+        }</span>
+        <span class="cov0" title="0">c.JSON(status, resp)</span>
+}
+
+// Ping the application.
+//
+//         A shallow health check to see if basic responses are working. Returns the date and hostname of the server handling the request.
+//                @Summary                Ping
+//                @Description        Ping
+//                @Tags                        status
+//                @Produce                json
+//                @Success                200                {object}        vo.PingResponseVO
+//                @Router                        /status/ping [get]
+func pingHandler(c *gin.Context) <span class="cov0" title="0">{
+        c.JSON(http.StatusOK, apicores.PingHandler())
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
