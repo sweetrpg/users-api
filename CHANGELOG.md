@@ -1,3 +1,12 @@
+## [0.3.1] - 2026-08-07
+
+### 🐛 Bug Fixes
+
+- Db secret path
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.3.0
 ## [0.3.0] - 2026-08-06
 
 ### 🚀 Features
