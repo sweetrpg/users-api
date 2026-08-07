@@ -1,3 +1,12 @@
+## [0.3.3] - 2026-08-07
+
+### 🐛 Bug Fixes
+
+- *(dependencies)* Upgrade fluent-mongo-driver to 1.1.0+
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.3.2
 ## [0.3.2] - 2026-08-07
 
 ### 🐛 Bug Fixes
