@@ -9,8 +9,10 @@ working in this repository.
 (see `sweetrpg/platform`'s `add-user-api-authn-authz` OpenSpec change) to reflect that expanded
 scope. Rewritten from Swift/Vapor to Go - see `sweetrpg/platform`'s `migrate-auth-users-api-to-go`
 OpenSpec change for the rationale (closing an observability gap: no tracing, no structured
-logging, no trace-header propagation) and migration strategy (parallel `api-v2` deploy behind the
-existing Service, cut over once verified). It reads/writes the same MongoDB collections
+logging, no trace-header propagation) and migration strategy (replaced the Swift deployment in
+place - no parallel `api-v0`/`api-v1` deploy; the platform is pre-MVP with no versioned-API
+contract to protect yet, see design.md's "Cutover strategy" decision). It reads/writes the same
+MongoDB collections
 (`users`, `login_profiles`) the Swift service produced; no data migration was needed. This repo's
 `users-model` Swift package dependency was dropped along with it.
 
@@ -56,9 +58,9 @@ rather than ported.
 ## Deployment
 
 `kubernetes/` (base + `overlays/{dev,local}`) deploys this service into the `sweetrpg-users`
-namespace. During the `migrate-auth-users-api-to-go` cutover it runs as `api-v2` alongside the
-existing Swift `api-v1`, per `docs/deployment-conventions.md`'s versioned-Ingress convention;
-`api-v1` is decommissioned once `api-v2` is confirmed healthy. `DB_URI` (or the
+namespace as a single `api` Deployment/Service - the Go rewrite replaced the Swift image and
+manifests in place, not as a parallel version. Rollback is `git revert` the cutover commit and
+let ArgoCD resync back to the Swift image. `DB_URI` (or the
 `DB_SCHEME`/`DB_HOST`/`DB_USER`/`DB_PW`/`DB_NAME`/`DB_OPTS` parts) and `INTERNAL_SERVICE_TOKEN`
 come from Akeyless via `ExternalSecret`s, not the configmap.
 
