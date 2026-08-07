@@ -24,8 +24,3 @@ labels:
 
 generatorOptions:
     disableNameSuffixHash: true
-
-images:
-    - name: users-api
-      newName: ghcr.io/sweetrpg/users-api
-      newTag: latest
