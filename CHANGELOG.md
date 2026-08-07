@@ -1,3 +1,17 @@
+## [0.4.0] - 2026-08-07
+
+### 🚀 Features
+
+- Scaffold Go rewrite of users-api
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.3.4
+- Clean up the files
+- Remove image patch
+- Switch users-api CI/build toolchain from Swift to Go
+- Point users-api Kubernetes manifests at the Go build
+- Remove duplicate secret
 ## [0.3.4] - 2026-08-07
 
 ### 🐛 Bug Fixes
