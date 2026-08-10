@@ -26,6 +26,12 @@ spec:
                 package: user
                 component: api
                 version: v1
+            annotations:
+                prometheus.io/scrape: "true"
+                prometheus.io/path: '/metrics'
+                prometheus.io/port: '8000'
+                openfeature.dev/enabled: "true"
+                openfeature.dev/featureflagsource: "sweetrpg-system/users-api"
         spec:
             serviceAccountName: api
             enableServiceLinks: false
