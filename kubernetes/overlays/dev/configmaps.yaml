@@ -19,3 +19,5 @@ data:
   BUILD_INFO_PATH: /app/config/build-info.json
   LOG_LEVEL: info
   OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo-distributor.observability.svc.cluster.local:4318/
+  PYROSCOPE_SERVER_ADDRESS: http://pyroscope.observability.svc.cluster.local:4040
+  PYROSCOPE_TENANT_ID: psw
