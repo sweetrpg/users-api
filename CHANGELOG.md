@@ -1,3 +1,19 @@
+## [0.5.0] - 2026-08-11
+
+### 🚀 Features
+
+- Gate continuous profiling behind the profiling-enabled feature flag
+
+### 🐛 Bug Fixes
+
+- *(ci)* Scope Docker Build's concurrency group by ref
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.4.1
+- Remove flags from repo
+- Annotations for feature flags
+- Bump api-core.go to v0.1.0
 ## [0.4.1] - 2026-08-07
 
 ### ⚙️ Miscellaneous Tasks
