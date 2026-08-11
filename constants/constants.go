@@ -17,6 +17,12 @@ const (
 const (
 	ServiceName = "users-api"
 
+	// ProfilingEnabledFlag is the feature-flag key gating continuous
+	// profiling, evaluated via api-core.go/featureflags. Replaces the old
+	// PYROSCOPE_SERVER_ADDRESS-presence check; see
+	// openspec/changes/pyroscope-profiling-feature-flag in sweetrpg/platform.
+	ProfilingEnabledFlag = "profiling-enabled"
+
 	// UsersCollection is the MongoDB collection name for user profile
 	// documents, unchanged from the Swift service's Fluent schema
 	// (UserModel's User.v20210620.schemaName).
