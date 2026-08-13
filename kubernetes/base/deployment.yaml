@@ -27,6 +27,7 @@ spec:
                 component: api
                 version: v1
             annotations:
+                reloader.stakater.com/auto: "true"
                 prometheus.io/scrape: "true"
                 prometheus.io/path: '/metrics'
                 prometheus.io/port: '8000'
