@@ -1,3 +1,20 @@
+## [0.6.0] - 2026-08-18
+
+### 🚀 Features
+
+- *(local)* Add MongoDB database configuration to configmap
+- *(auth)* Authorize admin users listing on forwarded user token, not shared secret
+
+### 📚 Documentation
+
+- Describe the Go service instead of Vapor in README.md
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.5.0
+- Remove Swift/Vapor source tree, no longer used
+- Reloader, pod monitor
+- *(kubernetes)* Wire AUTH_API_URL in dev overlay
 ## [0.5.0] - 2026-08-11
 
 ### 🚀 Features
