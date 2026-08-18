@@ -8,25 +8,24 @@
 [![Dependabot](https://badgen.net/github/dependabot/sweetrpg/users-api)](https://badgen.net/github/dependabot/sweetrpg/users-api)
 [![Deployment](https://argocd.dev.pilgrimagesoftware.com/api/badge?name=sweetrpg-users-api&revision=true&showAppName=true&namespace=sweetrpg-system)](https://argocd.dev.pilgrimagesoftware.com/applications/sweetrpg-users-api)
 
-[![Swift](https://img.shields.io/badge/Swift-F05138?style=for-the-badge&logo=swift&logoColor=white)](https://img.shields.io/badge/Swift-F05138?style=for-the-badge&logo=swift&logoColor=white)
+[![Go](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white)
 [![Built with love](https://ForTheBadge.com/images/badges/built-with-love.svg)](https://ForTheBadge.com/images/badges/built-with-love.svg)
 
-Vapor (Swift) API service for the platform's identity domain: authentication, authorization,
-profile data, settings, and entitlements. Renamed from `profiles-api` - see `sweetrpg/platform`'s
-`add-user-api-authn-authz` OpenSpec change for the rationale.
+Go API service for the platform's user profile/management data. Rewritten from Swift/Vapor - see
+`sweetrpg/platform`'s `migrate-auth-users-api-to-go` OpenSpec change for the rationale.
+Authentication/authorization moved to a dedicated `auth-api` service - see
+`sweetrpg/platform`'s `split-authz-into-auth-api` OpenSpec change.
 
-Verifies Auth0-issued access tokens server-side (JWKS signature verification) and exposes
-`POST /authz/check` for other services to call. See `AGENTS.md` for the role model and consumer
-list.
+Exposes `GET /api/admin/users` for `admin-web`'s user listing. See `AGENTS.md` for the full
+scope and consumer list.
 
 ## Run locally
 
 ```bash
-swift run
+go run cmd/users-api/main.go
 ```
 
-Serves on `:8080`. Without `REDIS_HOST` set, falls back to in-memory sessions and no response
-caching - fine for local development.
+Serves on `:8000` (`BIND_ADDRESS` to override).
 
 ## Contributing
 
