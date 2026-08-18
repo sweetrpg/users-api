@@ -30,17 +30,16 @@ already dead code (zero routes registered) by the time of the Go rewrite and wer
   role/service-access management UI - `users-api` itself has no authorization data to serve.
 - `users-web`: end-user profile/settings pages.
 
-### Internal service auth (`admin-web` → `AdminUsersController`)
+### Caller auth (`admin-web` → `AdminUsersController`)
 
-`AdminUsersController`'s `GET /api/admin/users` route accepts `X-Internal-Service-Token`
-(matching the `INTERNAL_SERVICE_TOKEN` env var, see `InternalServiceAuth.swift`) as its only
-authentication - `admin-web` never holds an Auth0 access token of its own (it reads
-`auth-web`'s shared session instead). Whoever holds this shared secret is trusted outright, on
-the assumption that `admin-web`'s own `AuthRequiredMiddleware` already verified the acting user
-has the `admin` role before ever making the call. This is a narrower purpose than it used to
-serve (it used to gate the full role/deny-entry CRUD surface too, before that moved to
-`auth-api`) - `INTERNAL_SERVICE_TOKEN` here and `auth-api`'s own copy of the same mechanism are
-independent secrets, not required to match.
+`admin_users.go`'s `GET /api/admin/users` route requires either a forwarded user bearer token
+carrying the `admin` role (verified against `auth-api`'s `/authz/check`, via the `authz` package)
+or, as a legacy fallback during migration, the shared `X-Internal-Service-Token` header (matching
+`INTERNAL_SERVICE_TOKEN`) - see `sweetrpg/platform`'s `api-client-auth` OpenSpec change.
+`admin-web` forwards the acting admin's own Auth0 access token from its shared session as the
+bearer credential; the legacy header path exists only for callers not yet migrated and will be
+removed once none remain. `INTERNAL_SERVICE_TOKEN` here and `auth-api`'s own copy of the same
+fallback mechanism are independent secrets, not required to match.
 
 ## Language and Framework
 
