@@ -26,6 +26,7 @@ import (
 	"github.com/sweetrpg/common.go/logging"
 	"github.com/sweetrpg/common.go/util"
 	"github.com/sweetrpg/mongodb.go/database"
+	"github.com/sweetrpg/users-api/authz"
 	"github.com/sweetrpg/users-api/constants"
 	"github.com/sweetrpg/users-api/docs"
 	"github.com/sweetrpg/users-api/server"
@@ -79,7 +80,8 @@ func main() {
 
 	r.Use(RateLimiter())
 
-	server.SetupHandlers(r)
+	authzClient := authz.NewClient(util.GetEnv(constants.AUTH_API_URL, ""))
+	server.SetupHandlers(r, authzClient)
 
 	_ = r.Run(util.GetEnv(apiconstants.BIND_ADDRESS, ":8000"))
 }
@@ -94,13 +96,17 @@ func setupSwagger(r *gin.Engine) {
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
 }
 
-// checkInternalServiceTokenConfig warns at startup if INTERNAL_SERVICE_TOKEN
-// is unset, since that permanently disables GET /api/admin/users (every
-// request falls through to a 401) rather than silently trusting an empty
-// token.
+// checkInternalServiceTokenConfig warns at startup if neither the legacy
+// INTERNAL_SERVICE_TOKEN fallback nor AUTH_API_URL (for forwarded user bearer
+// tokens) is configured, since that permanently disables GET
+// /api/admin/users (every request falls through to a 401) rather than
+// silently trusting an empty token.
 func checkInternalServiceTokenConfig() {
 	if util.GetEnv(constants.INTERNAL_SERVICE_TOKEN, "") == "" {
-		logging.Logger.Warn("INTERNAL_SERVICE_TOKEN not set, GET /api/admin/users will reject every request with 401")
+		logging.Logger.Warn("INTERNAL_SERVICE_TOKEN not set, legacy header fallback disabled for GET /api/admin/users")
+	}
+	if util.GetEnv(constants.AUTH_API_URL, "") == "" {
+		logging.Logger.Warn("AUTH_API_URL not set, forwarded user bearer tokens cannot be verified for GET /api/admin/users")
 	}
 }
 
