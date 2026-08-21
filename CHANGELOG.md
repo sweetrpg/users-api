@@ -1,3 +1,12 @@
+## [0.6.1] - 2026-08-21
+
+### 🐛 Bug Fixes
+
+- *(kubernetes)* Fix cpu resource limit quantity that never matched ArgoCD's applied manifest
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.6.0
 ## [0.6.0] - 2026-08-18
 
 ### 🚀 Features
