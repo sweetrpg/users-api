@@ -30,14 +30,13 @@ func newAuthzStub(t *testing.T, response authz.CheckResponse, status int) *httpt
 	return srv
 }
 
-// TestListUsersRequiresInternalToken ports AdminUsersControllerTests and
-// InternalServiceAuthTests from the Swift service: the legacy internal-token check runs
-// before any database access, so these assertions don't require a reachable MongoDB.
-func TestListUsersRequiresInternalToken(t *testing.T) {
-	t.Setenv("INTERNAL_SERVICE_TOKEN", "test-internal-token")
+// TestListUsersRequiresBearerToken asserts GET /api/admin/users rejects requests
+// without a bearer token before any database access, so these assertions don't
+// require a reachable MongoDB.
+func TestListUsersRequiresBearerToken(t *testing.T) {
 	r := newAdminUsersTestRouter(t, "")
 
-	t.Run("missing token is unauthorized", func(t *testing.T) {
+	t.Run("missing credentials is unauthorized", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
@@ -46,32 +45,15 @@ func TestListUsersRequiresInternalToken(t *testing.T) {
 		}
 	})
 
-	t.Run("mismatched token is unauthorized", func(t *testing.T) {
+	t.Run("non-bearer authorization header is unauthorized", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
-		req.Header.Set(internalServiceTokenHeader, "wrong-token")
+		req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 		}
 	})
-}
-
-// TestListUsersDisabledWithoutConfiguredToken mirrors the Swift service's
-// InternalServiceAuth.hasValidInternalServiceToken guarantee: an unset
-// INTERNAL_SERVICE_TOKEN permanently disables the legacy fallback path rather than
-// trusting an empty presented token.
-func TestListUsersDisabledWithoutConfiguredToken(t *testing.T) {
-	t.Setenv("INTERNAL_SERVICE_TOKEN", "")
-	r := newAdminUsersTestRouter(t, "")
-
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
-	req.Header.Set(internalServiceTokenHeader, "")
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
 }
 
 func TestListUsersBearerToken_RejectsWithoutAdminRole(t *testing.T) {
