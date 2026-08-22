@@ -55,12 +55,6 @@ paths:
   /api/admin/users:
     get:
       description: List user identities
-      parameters:
-      - description: Shared internal-service secret
-        in: header
-        name: X-Internal-Service-Token
-        required: true
-        type: string
       produces:
       - application/json
       responses:
@@ -72,6 +66,10 @@ paths:
             type: array
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "403":
+          description: Forbidden
           schema:
             $ref: '#/definitions/vo.ErrorVO'
         "500":

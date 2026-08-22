@@ -1,3 +1,12 @@
+## [0.6.2] - 2026-08-22
+
+### 🚜 Refactor
+
+- *(auth)* Remove legacy X-Internal-Service-Token fallback from admin users listing
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.6.1
 ## [0.6.1] - 2026-08-21
 
 ### 🐛 Bug Fixes

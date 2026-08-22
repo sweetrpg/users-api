@@ -32,14 +32,11 @@ already dead code (zero routes registered) by the time of the Go rewrite and wer
 
 ### Caller auth (`admin-web` → `AdminUsersController`)
 
-`admin_users.go`'s `GET /api/admin/users` route requires either a forwarded user bearer token
-carrying the `admin` role (verified against `auth-api`'s `/authz/check`, via the `authz` package)
-or, as a legacy fallback during migration, the shared `X-Internal-Service-Token` header (matching
-`INTERNAL_SERVICE_TOKEN`) - see `sweetrpg/platform`'s `api-client-auth` OpenSpec change.
-`admin-web` forwards the acting admin's own Auth0 access token from its shared session as the
-bearer credential; the legacy header path exists only for callers not yet migrated and will be
-removed once none remain. `INTERNAL_SERVICE_TOKEN` here and `auth-api`'s own copy of the same
-fallback mechanism are independent secrets, not required to match.
+`admin_users.go`'s `GET /api/admin/users` route requires a forwarded user bearer token carrying
+the `admin` role, verified against `auth-api`'s `/authz/check` via the `authz` package - see
+`sweetrpg/platform`'s `api-client-auth` OpenSpec change. `admin-web` forwards the acting admin's
+own Auth0 access token from its shared session as the bearer credential. The former shared-secret
+fallback (`X-Internal-Service-Token`) was removed once all known callers had migrated.
 
 ## Language and Framework
 
@@ -60,8 +57,8 @@ rather than ported.
 namespace as a single `api` Deployment/Service - the Go rewrite replaced the Swift image and
 manifests in place, not as a parallel version. Rollback is `git revert` the cutover commit and
 let ArgoCD resync back to the Swift image. `DB_URI` (or the
-`DB_SCHEME`/`DB_HOST`/`DB_USER`/`DB_PW`/`DB_NAME`/`DB_OPTS` parts) and `INTERNAL_SERVICE_TOKEN`
-come from Akeyless via `ExternalSecret`s, not the configmap.
+`DB_SCHEME`/`DB_HOST`/`DB_USER`/`DB_PW`/`DB_NAME`/`DB_OPTS` parts) come from Akeyless via
+`ExternalSecret`s, not the configmap.
 
 ## Committing Code
 
