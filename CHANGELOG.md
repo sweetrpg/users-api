@@ -1,3 +1,12 @@
+## [0.6.3] - 2026-08-22
+
+### 🐛 Bug Fixes
+
+- *(k8s)* Drop dangling secrets/misc.yaml reference from dev overlay
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.6.2
 ## [0.6.2] - 2026-08-22
 
 ### 🚜 Refactor
