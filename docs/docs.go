@@ -34,15 +34,6 @@ const docTemplate = `{
                     "admin"
                 ],
                 "summary": "List user identities",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Shared internal-service secret",
-                        "name": "X-Internal-Service-Token",
-                        "in": "header",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -55,6 +46,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/vo.ErrorVO"
                         }
