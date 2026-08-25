@@ -769,17 +769,17 @@ func EnsureLoginProfileIndexes(ctx context.Context) error <span class="cov1" tit
 func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="13">{
         if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
-        }</span> else<span class="cov8" title="13"> if profile != nil </span><span class="cov1" title="1">{
+        }</span> else<span class="cov8" title="13"> if profile != nil </span><span class="cov4" title="3">{
                 return ProvisionResult{UserID: profile.UserID, Created: false}, nil
         }</span>
 
-        <span class="cov8" title="12">userID := uuid.New()
+        <span class="cov7" title="10">userID := uuid.New()
         user := userDoc{ID: userID, Name: name, Email: email}
         if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
         }</span>
 
-        <span class="cov8" title="12">profile := loginProfileDoc{
+        <span class="cov7" title="10">profile := loginProfileDoc{
                 ID:               uuid.New(),
                 UserID:           userID,
                 ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
@@ -789,7 +789,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
         if err == nil </span><span class="cov4" title="3">{
                 return ProvisionResult{UserID: userID, Created: true}, nil
         }</span>
-        <span class="cov7" title="9">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
+        <span class="cov6" title="7">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                 // ponytail: the userDoc insert above already committed, so a non-duplicate-key
                 // failure here leaves an orphaned User with no LoginProfile. Acceptable for now -
                 // revisit with a transaction if orphaned Users become a real problem.
@@ -798,17 +798,17 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 
         // Lost the race: a concurrent first login for the same subject won. Its LoginProfile now
         // exists, so return its User.id instead of the one we just created.
-        <span class="cov7" title="9">existing, findErr := findLoginProfileBySubject(ctx, subject)
+        <span class="cov6" title="7">existing, findErr := findLoginProfileBySubject(ctx, subject)
         if findErr != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, findErr
         }</span>
-        <span class="cov7" title="9">if existing == nil </span><span class="cov0" title="0">{
+        <span class="cov6" title="7">if existing == nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
         }</span>
-        <span class="cov7" title="9">return ProvisionResult{UserID: existing.UserID, Created: false}, nil</span>
+        <span class="cov6" title="7">return ProvisionResult{UserID: existing.UserID, Created: false}, nil</span>
 }
 
-func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="22">{
+func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="20">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
@@ -817,8 +817,8 @@ func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfi
 
         var profile loginProfileDoc
         err := database.Db.Collection(constants.LoginProfilesCollection).FindOne(ctx, filter).Decode(&amp;profile)
-        if err != nil </span><span class="cov8" title="12">{
-                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="12">{
+        if err != nil </span><span class="cov7" title="10">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov7" title="10">{
                         return nil, nil
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
