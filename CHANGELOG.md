@@ -1,3 +1,17 @@
+## [0.7.0] - 2026-08-25
+
+### 🚀 Features
+
+- *(users-api)* Add identity provisioning endpoint
+
+### 🐛 Bug Fixes
+
+- *(users-api)* Forward user bearer token instead of shared secret
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.6.3
+- *(kubernetes)* Wire INTERNAL_SERVICE_TOKEN for provisioning endpoint
 ## [0.6.3] - 2026-08-22
 
 ### 🐛 Bug Fixes
