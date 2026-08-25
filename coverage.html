@@ -63,7 +63,7 @@
 				
 				<option value="file3">github.com/sweetrpg/users-api/models/profile.go (76.2%)</option>
 				
-				<option value="file4">github.com/sweetrpg/users-api/models/provisioning.go (77.6%)</option>
+				<option value="file4">github.com/sweetrpg/users-api/models/provisioning.go (78.3%)</option>
 				
 				<option value="file5">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
@@ -947,6 +947,7 @@ func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website str
 import (
         "context"
         "errors"
+        "fmt"
 
         "github.com/google/uuid"
         "github.com/sweetrpg/mongodb.go/database"
@@ -998,16 +999,16 @@ func EnsureUserIndexes(ctx context.Context) error <span class="cov1" title="1">{
 // LoginProfile the first time that subject is seen. name/email seed the new User doc on creation
 // only - a repeat call for an existing subject never overwrites them (profile edits are a
 // separate change's concern, see design.md).
-func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="16">{
+func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="17">{
         if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
-        }</span> else<span class="cov8" title="16"> if profile != nil </span><span class="cov1" title="1">{
+        }</span> else<span class="cov8" title="17"> if profile != nil </span><span class="cov1" title="1">{
                 return ProvisionResult{UserID: profile.UserID, Created: false}, nil
         }</span>
 
-        <span class="cov8" title="15">userID := uuid.New()
+        <span class="cov8" title="16">userID := uuid.New()
         user := userDoc{ID: userID, Name: name, Email: email}
-        if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov8" title="14">{
+        if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov8" title="15">{
                 if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
                 }</span>
@@ -1018,24 +1019,24 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
                 // below still reflects whether this call is the one that newly links this *subject* -
                 // not whether the User document itself was newly inserted, matching the documented API
                 // contract ("repeat calls for an existing subject return created: false").
-                <span class="cov8" title="14">existingUser, findErr := findUserByEmail(ctx, email)
+                <span class="cov8" title="15">existingUser, findErr := findUserByEmail(ctx, email)
                 if findErr != nil </span><span class="cov0" title="0">{
                         return ProvisionResult{}, findErr
                 }</span>
-                <span class="cov8" title="14">if existingUser == nil </span><span class="cov0" title="0">{
+                <span class="cov8" title="15">if existingUser == nil </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
                 }</span>
-                <span class="cov8" title="14">userID = existingUser.ID</span>
+                <span class="cov8" title="15">userID = existingUser.ID</span>
         }
 
-        <span class="cov8" title="15">profile := loginProfileDoc{
+        <span class="cov8" title="16">profile := loginProfileDoc{
                 ID:               uuid.New(),
                 UserID:           userID,
                 ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
                 ThirdPartyAuthID: subject,
         }
         _, err := database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
-        if err == nil </span><span class="cov5" title="6">{
+        if err == nil </span><span class="cov6" title="7">{
                 return ProvisionResult{UserID: userID, Created: true}, nil
         }</span>
         <span class="cov6" title="9">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
@@ -1057,24 +1058,51 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
         <span class="cov6" title="9">return ProvisionResult{UserID: existing.UserID, Created: false}, nil</span>
 }
 
-func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span class="cov8" title="14">{
+// findUserByEmail decodes leniently via bson.Raw rather than straight into userDoc: a legacy
+// document predating this Go service (e.g. a manually bootstrapped admin record, see auth-api's
+// AGENTS.md for the equivalent user_roles bootstrap procedure) can have `_id` stored as a plain
+// BSON string rather than this service's own binary uuid.UUID encoding - confirmed in dev, where
+// a real such document exists. A straight `.Decode(&amp;userDoc{})` errors on that mismatch instead
+// of adopting the record.
+func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span class="cov8" title="15">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 bson.D{{Key: "email", Value: email}},
         }}}
 
-        var user userDoc
-        err := database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;user)
+        var raw bson.Raw
+        err := database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;raw)
         if err != nil </span><span class="cov0" title="0">{
                 if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov0" title="0">{
                         return nil, nil
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
         }
-        <span class="cov8" title="14">return &amp;user, nil</span>
+
+        <span class="cov8" title="15">id, err := decodeFlexibleUUID(raw.Lookup("_id"))
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decoding legacy user _id for email %q: %w", email, err)
+        }</span>
+
+        <span class="cov8" title="15">name, _ := raw.Lookup("name").StringValueOK()
+        docEmail, _ := raw.Lookup("email").StringValueOK()
+        return &amp;userDoc{ID: id, Name: name, Email: docEmail}, nil</span>
 }
 
-func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="28">{
+// decodeFlexibleUUID accepts both this service's own binary uuid.UUID encoding and a legacy
+// plain-string UUID.
+func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov8" title="15">{
+        if s, ok := v.StringValueOK(); ok </span><span class="cov1" title="1">{
+                return uuid.Parse(s)
+        }</span>
+        <span class="cov8" title="14">var id uuid.UUID
+        if err := v.Unmarshal(&amp;id); err != nil </span><span class="cov0" title="0">{
+                return uuid.UUID{}, err
+        }</span>
+        <span class="cov8" title="14">return id, nil</span>
+}
+
+func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="29">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
@@ -1083,8 +1111,8 @@ func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfi
 
         var profile loginProfileDoc
         err := database.Db.Collection(constants.LoginProfilesCollection).FindOne(ctx, filter).Decode(&amp;profile)
-        if err != nil </span><span class="cov8" title="16">{
-                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="16">{
+        if err != nil </span><span class="cov8" title="17">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="17">{
                         return nil, nil
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
