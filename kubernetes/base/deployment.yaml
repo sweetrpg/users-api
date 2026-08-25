@@ -49,6 +49,8 @@ spec:
                             name: api-env
                       - secretRef:
                             name: api-db
+                      - secretRef:
+                            name: api-misc
                   ports:
                       - containerPort: 8000
                         name: http
