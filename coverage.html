@@ -63,7 +63,7 @@
 				
 				<option value="file3">github.com/sweetrpg/users-api/models/profile.go (76.2%)</option>
 				
-				<option value="file4">github.com/sweetrpg/users-api/models/provisioning.go (80.6%)</option>
+				<option value="file4">github.com/sweetrpg/users-api/models/provisioning.go (77.6%)</option>
 				
 				<option value="file5">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
@@ -287,6 +287,9 @@ func main() <span class="cov0" title="0">{
 
         if err := models.EnsureLoginProfileIndexes(context.Background()); err != nil </span><span class="cov0" title="0">{
                 logging.Logger.Error("Failed to ensure login_profiles indexes", "error", err.Error())
+        }</span>
+        <span class="cov0" title="0">if err := models.EnsureUserIndexes(context.Background()); err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("Failed to ensure users indexes", "error", err.Error())
         }</span>
 
         <span class="cov0" title="0">setupAcuator(r)
@@ -975,34 +978,67 @@ func EnsureLoginProfileIndexes(ctx context.Context) error <span class="cov1" tit
         return err
 }</span>
 
+// EnsureUserIndexes creates the unique index on users.email - inherited from the original Swift
+// service's Fluent schema (a `.unique(on: \.$email)` field constraint), but never explicitly
+// created by this Go service until now, relying entirely on the index having survived the
+// migration. Codified here so FindOrCreateUser's email-collision handling has something to
+// actually collide with in a fresh database (a new local/test Mongo instance, or if the
+// collection is ever recreated) rather than depending on inherited Atlas state. Safe to call on
+// every startup - CreateOne is idempotent for an identical index definition.
+func EnsureUserIndexes(ctx context.Context) error <span class="cov1" title="1">{
+        collection := database.Db.Collection(constants.UsersCollection)
+        _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+                Keys:    bson.D{{Key: "email", Value: 1}},
+                Options: options.Index().SetUnique(true),
+        })
+        return err
+}</span>
+
 // FindOrCreateUser returns the User.id linked to subject's Auth0 login, creating a new User and
 // LoginProfile the first time that subject is seen. name/email seed the new User doc on creation
 // only - a repeat call for an existing subject never overwrites them (profile edits are a
 // separate change's concern, see design.md).
-func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="15">{
+func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="16">{
         if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
-        }</span> else<span class="cov8" title="15"> if profile != nil </span><span class="cov1" title="1">{
+        }</span> else<span class="cov8" title="16"> if profile != nil </span><span class="cov1" title="1">{
                 return ProvisionResult{UserID: profile.UserID, Created: false}, nil
         }</span>
 
-        <span class="cov8" title="14">userID := uuid.New()
+        <span class="cov8" title="15">userID := uuid.New()
         user := userDoc{ID: userID, Name: name, Email: email}
-        if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov0" title="0">{
-                return ProvisionResult{}, err
-        }</span>
+        if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov8" title="14">{
+                if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
+                        return ProvisionResult{}, err
+                }</span>
+                // A User with this email already exists - predates this subject's first Auth0 login
+                // (e.g. a manually bootstrapped admin record, see auth-api's AGENTS.md for the
+                // equivalent user_roles bootstrap procedure). Adopt it rather than failing: link a new
+                // LoginProfile to the existing User instead of erroring on the collision. `Created`
+                // below still reflects whether this call is the one that newly links this *subject* -
+                // not whether the User document itself was newly inserted, matching the documented API
+                // contract ("repeat calls for an existing subject return created: false").
+                <span class="cov8" title="14">existingUser, findErr := findUserByEmail(ctx, email)
+                if findErr != nil </span><span class="cov0" title="0">{
+                        return ProvisionResult{}, findErr
+                }</span>
+                <span class="cov8" title="14">if existingUser == nil </span><span class="cov0" title="0">{
+                        return ProvisionResult{}, err
+                }</span>
+                <span class="cov8" title="14">userID = existingUser.ID</span>
+        }
 
-        <span class="cov8" title="14">profile := loginProfileDoc{
+        <span class="cov8" title="15">profile := loginProfileDoc{
                 ID:               uuid.New(),
                 UserID:           userID,
                 ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
                 ThirdPartyAuthID: subject,
         }
         _, err := database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
-        if err == nil </span><span class="cov5" title="5">{
+        if err == nil </span><span class="cov5" title="6">{
                 return ProvisionResult{UserID: userID, Created: true}, nil
         }</span>
-        <span class="cov7" title="9">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
+        <span class="cov6" title="9">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                 // ponytail: the userDoc insert above already committed, so a non-duplicate-key
                 // failure here leaves an orphaned User with no LoginProfile. Acceptable for now -
                 // revisit with a transaction if orphaned Users become a real problem.
@@ -1011,17 +1047,34 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 
         // Lost the race: a concurrent first login for the same subject won. Its LoginProfile now
         // exists, so return its User.id instead of the one we just created.
-        <span class="cov7" title="9">existing, findErr := findLoginProfileBySubject(ctx, subject)
+        <span class="cov6" title="9">existing, findErr := findLoginProfileBySubject(ctx, subject)
         if findErr != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, findErr
         }</span>
-        <span class="cov7" title="9">if existing == nil </span><span class="cov0" title="0">{
+        <span class="cov6" title="9">if existing == nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
         }</span>
-        <span class="cov7" title="9">return ProvisionResult{UserID: existing.UserID, Created: false}, nil</span>
+        <span class="cov6" title="9">return ProvisionResult{UserID: existing.UserID, Created: false}, nil</span>
 }
 
-func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="27">{
+func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span class="cov8" title="14">{
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                bson.D{{Key: "email", Value: email}},
+        }}}
+
+        var user userDoc
+        err := database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;user)
+        if err != nil </span><span class="cov0" title="0">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov0" title="0">{
+                        return nil, nil
+                }</span>
+                <span class="cov0" title="0">return nil, err</span>
+        }
+        <span class="cov8" title="14">return &amp;user, nil</span>
+}
+
+func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="28">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
@@ -1030,8 +1083,8 @@ func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfi
 
         var profile loginProfileDoc
         err := database.Db.Collection(constants.LoginProfilesCollection).FindOne(ctx, filter).Decode(&amp;profile)
-        if err != nil </span><span class="cov8" title="15">{
-                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="15">{
+        if err != nil </span><span class="cov8" title="16">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="16">{
                         return nil, nil
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
