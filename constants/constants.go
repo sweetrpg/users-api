@@ -10,6 +10,11 @@ const (
 	// AUTH_API_URL is auth-api's base URL, used by server.listUsers to verify forwarded
 	// user bearer tokens via /authz/check.
 	AUTH_API_URL = "AUTH_API_URL"
+
+	// INTERNAL_SERVICE_TOKEN is a shared secret gating POST /internal/identities/provision,
+	// the one caller (auth-web, mid-login) that structurally can't forward a user bearer
+	// token. See openspec/changes/add-users-api-provisioning's design.md.
+	INTERNAL_SERVICE_TOKEN = "INTERNAL_SERVICE_TOKEN"
 )
 
 // Value constants

@@ -5,7 +5,8 @@ import (
 	"github.com/sweetrpg/users-api/authz"
 )
 
-func SetupHandlers(g *gin.Engine, authzClient *authz.Client) {
+func SetupHandlers(g *gin.Engine, authzClient *authz.Client, internalServiceToken string) {
 	setupAdminUsersHandlers(g, authzClient)
+	setupProvisionHandlers(g, internalServiceToken)
 	setupStatusHandlers(g)
 }

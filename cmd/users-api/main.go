@@ -29,6 +29,7 @@ import (
 	"github.com/sweetrpg/users-api/authz"
 	"github.com/sweetrpg/users-api/constants"
 	"github.com/sweetrpg/users-api/docs"
+	"github.com/sweetrpg/users-api/models"
 	"github.com/sweetrpg/users-api/server"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"golang.org/x/time/rate"
@@ -68,11 +69,16 @@ func main() {
 	setupCORS(r)
 
 	checkAdminUsersAuthConfig()
+	checkInternalServiceTokenConfig()
 
 	setupMetrics(r)
 
 	database.SetupDatabase()
 	defer database.TeardownDatabase()
+
+	if err := models.EnsureLoginProfileIndexes(context.Background()); err != nil {
+		logging.Logger.Error("Failed to ensure login_profiles indexes", "error", err.Error())
+	}
 
 	setupAcuator(r)
 
@@ -81,7 +87,7 @@ func main() {
 	r.Use(RateLimiter())
 
 	authzClient := authz.NewClient(util.GetEnv(constants.AUTH_API_URL, ""))
-	server.SetupHandlers(r, authzClient)
+	server.SetupHandlers(r, authzClient, util.GetEnv(constants.INTERNAL_SERVICE_TOKEN, ""))
 
 	_ = r.Run(util.GetEnv(apiconstants.BIND_ADDRESS, ":8000"))
 }
@@ -103,6 +109,15 @@ func setupSwagger(r *gin.Engine) {
 func checkAdminUsersAuthConfig() {
 	if util.GetEnv(constants.AUTH_API_URL, "") == "" {
 		logging.Logger.Warn("AUTH_API_URL not set, forwarded user bearer tokens cannot be verified for GET /api/admin/users")
+	}
+}
+
+// checkInternalServiceTokenConfig warns at startup if INTERNAL_SERVICE_TOKEN is not
+// configured, since that permanently disables POST /internal/identities/provision (every
+// request 401s) rather than accepting any header value.
+func checkInternalServiceTokenConfig() {
+	if util.GetEnv(constants.INTERNAL_SERVICE_TOKEN, "") == "" {
+		logging.Logger.Warn("INTERNAL_SERVICE_TOKEN not set, POST /internal/identities/provision will reject every request")
 	}
 }
 
