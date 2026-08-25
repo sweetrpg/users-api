@@ -29,6 +29,7 @@ import (
 	"github.com/sweetrpg/users-api/authz"
 	"github.com/sweetrpg/users-api/constants"
 	"github.com/sweetrpg/users-api/docs"
+	"github.com/sweetrpg/users-api/models"
 	"github.com/sweetrpg/users-api/server"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"golang.org/x/time/rate"
@@ -74,6 +75,10 @@ func main() {
 	database.SetupDatabase()
 	defer database.TeardownDatabase()
 
+	if err := models.EnsureLoginProfileIndexes(context.Background()); err != nil {
+		logging.Logger.Error("Failed to ensure login_profiles indexes", "error", err.Error())
+	}
+
 	setupAcuator(r)
 
 	setupSwagger(r)
@@ -97,12 +102,12 @@ func setupSwagger(r *gin.Engine) {
 }
 
 // checkAdminUsersAuthConfig warns at startup if AUTH_API_URL (for forwarded user
-// bearer tokens) is not configured, since that permanently disables GET
-// /api/admin/users (every request falls through to a 401) rather than
-// silently trusting an empty token.
+// bearer tokens) is not configured, since that permanently disables both GET
+// /api/admin/users and POST /internal/identities/provision (every request falls through to a
+// 401/503) rather than silently trusting an empty token.
 func checkAdminUsersAuthConfig() {
 	if util.GetEnv(constants.AUTH_API_URL, "") == "" {
-		logging.Logger.Warn("AUTH_API_URL not set, forwarded user bearer tokens cannot be verified for GET /api/admin/users")
+		logging.Logger.Warn("AUTH_API_URL not set, forwarded user bearer tokens cannot be verified for GET /api/admin/users or POST /internal/identities/provision")
 	}
 }
 

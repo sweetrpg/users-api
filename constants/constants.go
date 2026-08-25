@@ -7,8 +7,8 @@ const (
 	PYROSCOPE_SERVER_ADDRESS = "PYROSCOPE_SERVER_ADDRESS"
 	PYROSCOPE_TENANT_ID      = "PYROSCOPE_TENANT_ID"
 
-	// AUTH_API_URL is auth-api's base URL, used by server.listUsers to verify forwarded
-	// user bearer tokens via /authz/check.
+	// AUTH_API_URL is auth-api's base URL, used to verify forwarded user bearer tokens via
+	// /authz/check for both GET /api/admin/users and POST /internal/identities/provision.
 	AUTH_API_URL = "AUTH_API_URL"
 )
 
