@@ -22,12 +22,16 @@ var notSoftDeletedFilter = bson.D{
 	}},
 }
 
-// userDoc is the users collection document shape, unchanged from the Swift
-// service's Fluent schema (UserModel.User).
+// userDoc is the users collection document shape. bio/website are additive fields beyond the
+// Swift service's original Fluent schema - missing on any pre-existing document, which the bson
+// driver decodes as the zero value (empty string), matching design.md's "no migration needed"
+// call.
 type userDoc struct {
-	ID    uuid.UUID `bson:"_id"`
-	Name  string    `bson:"name"`
-	Email string    `bson:"email"`
+	ID      uuid.UUID `bson:"_id"`
+	Name    string    `bson:"name"`
+	Email   string    `bson:"email"`
+	Bio     string    `bson:"bio"`
+	Website string    `bson:"website"`
 }
 
 // loginProfileDoc is the login_profiles collection document shape, unchanged
