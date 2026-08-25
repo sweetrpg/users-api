@@ -179,3 +179,36 @@ func TestFindOrCreateUser_AdoptsExistingUserWithSameEmail(t *testing.T) {
 		t.Errorf("users documents for email = %d, want 1 (no duplicate created)", count)
 	}
 }
+
+// TestFindOrCreateUser_AdoptsLegacyUserWithStringID regression-tests a second real dev incident,
+// found immediately after the fix above shipped: a legacy User document (predating this Go
+// service, likely from the original Swift/Fluent app) had `_id` stored as a plain BSON string
+// rather than this service's own binary uuid.UUID encoding, so adopting it via a straight
+// `.Decode(&userDoc{})` errored with "cannot decode string into an array" instead of succeeding.
+func TestFindOrCreateUser_AdoptsLegacyUserWithStringID(t *testing.T) {
+	email := "legacy-string-id-" + t.Name() + "@example.com"
+	subject := "auth0|test-adopt-string-id-" + t.Name()
+	t.Cleanup(func() { cleanupSubject(t, subject) })
+	t.Cleanup(func() { cleanupEmail(t, email) })
+
+	legacyUserID := uuid.New()
+	// Inserted as a raw bson.D, not the userDoc struct, so `_id` is stored as a plain string -
+	// reproducing the legacy document's exact shape rather than this service's own encoding.
+	_, err := database.Db.Collection(constants.UsersCollection).InsertOne(context.Background(),
+		bson.D{
+			{Key: "_id", Value: legacyUserID.String()},
+			{Key: "name", Value: "Legacy Admin"},
+			{Key: "email", Value: email},
+		})
+	if err != nil {
+		t.Fatalf("seeding legacy user: %v", err)
+	}
+
+	result, err := FindOrCreateUser(context.Background(), subject, "New Name", email)
+	if err != nil {
+		t.Fatalf("FindOrCreateUser: %v", err)
+	}
+	if result.UserID != legacyUserID {
+		t.Errorf("UserID = %v, want %v (the legacy User's own id, string-decoded)", result.UserID, legacyUserID)
+	}
+}
