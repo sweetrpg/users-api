@@ -8,5 +8,6 @@ import (
 func SetupHandlers(g *gin.Engine, authzClient *authz.Client) {
 	setupAdminUsersHandlers(g, authzClient)
 	setupProvisionHandlers(g, authzClient)
+	setupProfileHandlers(g, authzClient)
 	setupStatusHandlers(g)
 }
