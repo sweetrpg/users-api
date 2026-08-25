@@ -61,13 +61,17 @@
 				
 				<option value="file2">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
 				
-				<option value="file3">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
+				<option value="file3">github.com/sweetrpg/users-api/models/provisioning.go (80.6%)</option>
 				
-				<option value="file4">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
+				<option value="file4">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
-				<option value="file5">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				<option value="file5">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
 				
-				<option value="file6">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
+				<option value="file6">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				
+				<option value="file7">github.com/sweetrpg/users-api/server/provision.go (67.9%)</option>
+				
+				<option value="file8">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
 				
 				</select>
 			</div>
@@ -229,6 +233,7 @@ import (
         "github.com/sweetrpg/users-api/authz"
         "github.com/sweetrpg/users-api/constants"
         "github.com/sweetrpg/users-api/docs"
+        "github.com/sweetrpg/users-api/models"
         "github.com/sweetrpg/users-api/server"
         "go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
         "golang.org/x/time/rate"
@@ -274,7 +279,11 @@ func main() <span class="cov0" title="0">{
         database.SetupDatabase()
         defer database.TeardownDatabase()
 
-        setupAcuator(r)
+        if err := models.EnsureLoginProfileIndexes(context.Background()); err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("Failed to ensure login_profiles indexes", "error", err.Error())
+        }</span>
+
+        <span class="cov0" title="0">setupAcuator(r)
 
         setupSwagger(r)
 
@@ -297,12 +306,12 @@ func setupSwagger(r *gin.Engine) <span class="cov0" title="0">{
 }</span>
 
 // checkAdminUsersAuthConfig warns at startup if AUTH_API_URL (for forwarded user
-// bearer tokens) is not configured, since that permanently disables GET
-// /api/admin/users (every request falls through to a 401) rather than
-// silently trusting an empty token.
+// bearer tokens) is not configured, since that permanently disables both GET
+// /api/admin/users and POST /internal/identities/provision (every request falls through to a
+// 401/503) rather than silently trusting an empty token.
 func checkAdminUsersAuthConfig() <span class="cov0" title="0">{
         if util.GetEnv(constants.AUTH_API_URL, "") == "" </span><span class="cov0" title="0">{
-                logging.Logger.Warn("AUTH_API_URL not set, forwarded user bearer tokens cannot be verified for GET /api/admin/users")
+                logging.Logger.Warn("AUTH_API_URL not set, forwarded user bearer tokens cannot be verified for GET /api/admin/users or POST /internal/identities/provision")
         }</span>
 }
 
@@ -517,6 +526,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/internal/identities/provision": {
+            "post": {
+                "description": "Find or create a User/LoginProfile for the caller's own Auth0 identity",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "internal"
+                ],
+                "summary": "Provision a user identity",
+                "parameters": [
+                    {
+                        "description": "Provisioning request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.provisionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.provisionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
         "/status/health": {
             "get": {
                 "description": "Health check",
@@ -569,6 +630,28 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "subject": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.provisionRequest": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.provisionResponse": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "boolean"
+                },
+                "userId": {
                     "type": "string"
                 }
             }
@@ -643,7 +726,108 @@ func init() <span class="cov0" title="0">{
 }</span>
 </pre>
 		
-		<pre class="file" id="file3" style="display: none">// Package models defines the persisted document shapes for users-api and the
+		<pre class="file" id="file3" style="display: none">package models
+
+import (
+        "context"
+        "errors"
+
+        "github.com/google/uuid"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+        "go.mongodb.org/mongo-driver/mongo"
+        "go.mongodb.org/mongo-driver/mongo/options"
+)
+
+// ProvisionResult is the outcome of FindOrCreateUser.
+type ProvisionResult struct {
+        UserID  uuid.UUID
+        Created bool
+}
+
+// EnsureLoginProfileIndexes creates the unique index on
+// login_profiles.(thirdPartyAuth, thirdPartyAuthId) that FindOrCreateUser relies on to detect a
+// concurrent first-login race via a duplicate-key error instead of a read-then-write check. Safe
+// to call on every startup - CreateOne is idempotent for an identical index definition.
+func EnsureLoginProfileIndexes(ctx context.Context) error <span class="cov1" title="1">{
+        collection := database.Db.Collection(constants.LoginProfilesCollection)
+        _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+                Keys: bson.D{
+                        {Key: "thirdPartyAuth", Value: 1},
+                        {Key: "thirdPartyAuthId", Value: 1},
+                },
+                Options: options.Index().SetUnique(true),
+        })
+        return err
+}</span>
+
+// FindOrCreateUser returns the User.id linked to subject's Auth0 login, creating a new User and
+// LoginProfile the first time that subject is seen. name/email seed the new User doc on creation
+// only - a repeat call for an existing subject never overwrites them (profile edits are a
+// separate change's concern, see design.md).
+func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="13">{
+        if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
+                return ProvisionResult{}, err
+        }</span> else<span class="cov8" title="13"> if profile != nil </span><span class="cov1" title="1">{
+                return ProvisionResult{UserID: profile.UserID, Created: false}, nil
+        }</span>
+
+        <span class="cov8" title="12">userID := uuid.New()
+        user := userDoc{ID: userID, Name: name, Email: email}
+        if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov0" title="0">{
+                return ProvisionResult{}, err
+        }</span>
+
+        <span class="cov8" title="12">profile := loginProfileDoc{
+                ID:               uuid.New(),
+                UserID:           userID,
+                ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
+                ThirdPartyAuthID: subject,
+        }
+        _, err := database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
+        if err == nil </span><span class="cov4" title="3">{
+                return ProvisionResult{UserID: userID, Created: true}, nil
+        }</span>
+        <span class="cov7" title="9">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
+                // ponytail: the userDoc insert above already committed, so a non-duplicate-key
+                // failure here leaves an orphaned User with no LoginProfile. Acceptable for now -
+                // revisit with a transaction if orphaned Users become a real problem.
+                return ProvisionResult{}, err
+        }</span>
+
+        // Lost the race: a concurrent first login for the same subject won. Its LoginProfile now
+        // exists, so return its User.id instead of the one we just created.
+        <span class="cov7" title="9">existing, findErr := findLoginProfileBySubject(ctx, subject)
+        if findErr != nil </span><span class="cov0" title="0">{
+                return ProvisionResult{}, findErr
+        }</span>
+        <span class="cov7" title="9">if existing == nil </span><span class="cov0" title="0">{
+                return ProvisionResult{}, err
+        }</span>
+        <span class="cov7" title="9">return ProvisionResult{UserID: existing.UserID, Created: false}, nil</span>
+}
+
+func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="22">{
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
+                bson.D{{Key: "thirdPartyAuthId", Value: subject}},
+        }}}
+
+        var profile loginProfileDoc
+        err := database.Db.Collection(constants.LoginProfilesCollection).FindOne(ctx, filter).Decode(&amp;profile)
+        if err != nil </span><span class="cov8" title="12">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="12">{
+                        return nil, nil
+                }</span>
+                <span class="cov0" title="0">return nil, err</span>
+        }
+        <span class="cov7" title="10">return &amp;profile, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">// Package models defines the persisted document shapes for users-api and the
 // derived views built from them.
 package models
 
@@ -737,7 +921,7 @@ func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) <span class
 }
 </pre>
 		
-		<pre class="file" id="file4" style="display: none">package server
+		<pre class="file" id="file5" style="display: none">package server
 
 import (
         "net/http"
@@ -755,18 +939,18 @@ const (
         bearerPrefix = "Bearer "
 )
 
-func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov8" title="3">{
+func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov5" title="3">{
         logging.Logger.Info("Setting up admin users endpoint handlers...")
 
         g.GET("/api/admin/users", listUsersHandler(authzClient))
 }</span>
 
-func bearerToken(c *gin.Context) string <span class="cov10" title="4">{
+func bearerToken(c *gin.Context) string <span class="cov10" title="8">{
         auth := c.GetHeader("Authorization")
-        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov5" title="2">{
+        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov5" title="3">{
                 return ""
         }</span>
-        <span class="cov5" title="2">return strings.TrimPrefix(auth, bearerPrefix)</span>
+        <span class="cov7" title="5">return strings.TrimPrefix(auth, bearerPrefix)</span>
 }
 
 // List user identities.
@@ -783,15 +967,15 @@ func bearerToken(c *gin.Context) string <span class="cov10" title="4">{
 //                @Failure                403                {object}        apiv.ErrorVO
 //                @Failure                500                {object}        apiv.ErrorVO
 //                @Router                        /api/admin/users [get]
-func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov8" title="3">{
-        return func(c *gin.Context) </span><span class="cov10" title="4">{
+func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="3">{
+        return func(c *gin.Context) </span><span class="cov7" title="4">{
                 token := bearerToken(c)
-                if token == "" </span><span class="cov5" title="2">{
+                if token == "" </span><span class="cov4" title="2">{
                         c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                         return
                 }</span>
 
-                <span class="cov5" title="2">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+                <span class="cov4" title="2">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
                 if err != nil </span><span class="cov1" title="1">{
                         if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov1" title="1">{
                                 c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
@@ -818,7 +1002,7 @@ func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file5" style="display: none">package server
+		<pre class="file" id="file6" style="display: none">package server
 
 import (
         "github.com/gin-gonic/gin"
@@ -827,11 +1011,100 @@ import (
 
 func SetupHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov0" title="0">{
         setupAdminUsersHandlers(g, authzClient)
+        setupProvisionHandlers(g, authzClient)
         setupStatusHandlers(g)
 }</span>
 </pre>
 		
-		<pre class="file" id="file6" style="display: none">package server
+		<pre class="file" id="file7" style="display: none">package server
+
+import (
+        "net/http"
+
+        "github.com/gin-gonic/gin"
+        apiv "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/users-api/authz"
+        "github.com/sweetrpg/users-api/constants"
+        "github.com/sweetrpg/users-api/models"
+)
+
+type provisionRequest struct {
+        Name  string `json:"name"`
+        Email string `json:"email"`
+}
+
+type provisionResponse struct {
+        UserID  string `json:"userId"`
+        Created bool   `json:"created"`
+}
+
+func setupProvisionHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov10" title="4">{
+        logging.Logger.Info("Setting up identity provisioning endpoint handlers...")
+
+        g.POST("/internal/identities/provision", provisionHandler(authzClient))
+}</span>
+
+// Provision a User/LoginProfile record for a verified Auth0 identity.
+//
+//         Find-or-create path called by auth-web during /auth/callback, after Auth0 token exchange
+//         and the auth-api authz check both succeed. Requires the caller's own Auth0 access token as
+//         a bearer credential - verified against auth-api, same as GET /api/admin/users, rather than
+//         a shared secret. The provisioned subject is the verified token's own sub, not a
+//         client-supplied value, so a caller can only ever provision its own identity.
+//                @Summary                Provision a user identity
+//                @Description        Find or create a User/LoginProfile for the caller's own Auth0 identity
+//                @Tags                        internal
+//                @Accept                        json
+//                @Produce                json
+//                @Param                        request        body                provisionRequest        true        "Provisioning request"
+//                @Success                200                {object}        provisionResponse
+//                @Failure                400                {object}        apiv.ErrorVO
+//                @Failure                401                {object}        apiv.ErrorVO
+//                @Failure                500                {object}        apiv.ErrorVO
+//                @Router                        /internal/identities/provision [post]
+func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov10" title="4">{
+        return func(c *gin.Context) </span><span class="cov10" title="4">{
+                token := bearerToken(c)
+                if token == "" </span><span class="cov1" title="1">{
+                        c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
+                        return
+                }</span>
+
+                <span class="cov8" title="3">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+                if err != nil </span><span class="cov1" title="1">{
+                        if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov1" title="1">{
+                                c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
+                                return
+                        }</span>
+                        <span class="cov0" title="0">logging.Logger.Error("authz check failed", "error", err.Error())
+                        c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
+                        return</span>
+                }
+                <span class="cov5" title="2">if !result.Allowed || result.Sub == "" </span><span class="cov1" title="1">{
+                        c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller is not authorized"})
+                        return
+                }</span>
+
+                <span class="cov1" title="1">var req provisionRequest
+                if err := c.ShouldBindJSON(&amp;req); err != nil </span><span class="cov1" title="1">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid request body"})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">provisionResult, err := models.FindOrCreateUser(c.Request.Context(), result.Sub, req.Name, req.Email)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to provision user", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "provisioning_failed", Message: "failed to provision user"})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">c.JSON(http.StatusOK, provisionResponse{UserID: provisionResult.UserID.String(), Created: provisionResult.Created})</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package server
 
 import (
         "net/http"
