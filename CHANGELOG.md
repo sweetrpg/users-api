@@ -1,3 +1,9 @@
+## [0.8.3] - 2026-08-25
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.8.2
+- Tighten GOGC to 90 on users-api deployment
 ## [0.8.2] - 2026-08-25
 
 ### ⚙️ Miscellaneous Tasks
