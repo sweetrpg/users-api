@@ -61,17 +61,23 @@
 				
 				<option value="file2">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
 				
-				<option value="file3">github.com/sweetrpg/users-api/models/provisioning.go (80.6%)</option>
+				<option value="file3">github.com/sweetrpg/users-api/models/profile.go (76.2%)</option>
 				
-				<option value="file4">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
+				<option value="file4">github.com/sweetrpg/users-api/models/provisioning.go (80.6%)</option>
 				
-				<option value="file5">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
+				<option value="file5">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
-				<option value="file6">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				<option value="file6">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
 				
-				<option value="file7">github.com/sweetrpg/users-api/server/provision.go (67.9%)</option>
+				<option value="file7">github.com/sweetrpg/users-api/server/authz_resolve.go (81.2%)</option>
 				
-				<option value="file8">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
+				<option value="file8">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				
+				<option value="file9">github.com/sweetrpg/users-api/server/profile.go (46.0%)</option>
+				
+				<option value="file10">github.com/sweetrpg/users-api/server/provision.go (62.5%)</option>
+				
+				<option value="file11">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
 				
 				</select>
 			</div>
@@ -526,6 +532,100 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/profile": {
+            "get": {
+                "description": "Get the caller's own profile",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "profile"
+                ],
+                "summary": "Get the caller's own profile",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.profileResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Update the caller's own profile",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "profile"
+                ],
+                "summary": "Update the caller's own profile",
+                "parameters": [
+                    {
+                        "description": "Profile update",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.updateProfileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.profileResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
         "/internal/identities/provision": {
             "post": {
                 "description": "Find or create a User/LoginProfile for the caller's own Auth0 identity",
@@ -634,6 +734,23 @@ const docTemplate = `{
                 }
             }
         },
+        "server.profileResponse": {
+            "type": "object",
+            "properties": {
+                "bio": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "website": {
+                    "type": "string"
+                }
+            }
+        },
         "server.provisionRequest": {
             "type": "object",
             "properties": {
@@ -652,6 +769,20 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "userId": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.updateProfileRequest": {
+            "type": "object",
+            "properties": {
+                "bio": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "website": {
                     "type": "string"
                 }
             }
@@ -737,6 +868,88 @@ import (
         "github.com/sweetrpg/users-api/constants"
         "go.mongodb.org/mongo-driver/bson"
         "go.mongodb.org/mongo-driver/mongo"
+)
+
+// ErrProfileNotFound means the verified subject has no User/LoginProfile pair yet - the caller
+// hasn't completed a login since provisioning existed, or provisioning failed for their most
+// recent login (see add-users-api-provisioning's design.md).
+var ErrProfileNotFound = errors.New("models: profile not found")
+
+// Profile is the self-service view of a User's own record.
+type Profile struct {
+        UserID  uuid.UUID
+        Name    string
+        Email   string
+        Bio     string
+        Website string
+}
+
+// FindProfileBySubject resolves a verified Auth0 subject to its own Profile, via the same
+// LoginProfile join FindOrCreateUser uses. Returns ErrProfileNotFound if the subject has never
+// been provisioned.
+func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error) <span class="cov10" title="3">{
+        loginProfile, err := findLoginProfileBySubject(ctx, subject)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov10" title="3">if loginProfile == nil </span><span class="cov1" title="1">{
+                return nil, ErrProfileNotFound
+        }</span>
+
+        <span class="cov6" title="2">filter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                bson.D{{Key: "_id", Value: loginProfile.UserID}},
+        }}}
+        var user userDoc
+        err = database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;user)
+        if err != nil </span><span class="cov0" title="0">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov0" title="0">{
+                        return nil, ErrProfileNotFound
+                }</span>
+                <span class="cov0" title="0">return nil, err</span>
+        }
+
+        <span class="cov6" title="2">return &amp;Profile{
+                UserID: user.ID, Name: user.Name, Email: user.Email, Bio: user.Bio, Website: user.Website,
+        }, nil</span>
+}
+
+// UpdateProfile updates name/bio/website for userID - email is never writable through this
+// path (see design.md's "email is read-only" decision). Returns ErrProfileNotFound if userID
+// doesn't match an existing, non-soft-deleted User.
+func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website string) error <span class="cov6" title="2">{
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                bson.D{{Key: "_id", Value: userID}},
+        }}}
+        update := bson.D{{Key: "$set", Value: bson.D{
+                {Key: "name", Value: name},
+                {Key: "bio", Value: bio},
+                {Key: "website", Value: website},
+        }}}
+
+        result, err := database.Db.Collection(constants.UsersCollection).UpdateOne(ctx, filter, update)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov6" title="2">if result.MatchedCount == 0 </span><span class="cov1" title="1">{
+                return ErrProfileNotFound
+        }</span>
+        <span class="cov1" title="1">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package models
+
+import (
+        "context"
+        "errors"
+
+        "github.com/google/uuid"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+        "go.mongodb.org/mongo-driver/mongo"
         "go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -766,30 +979,30 @@ func EnsureLoginProfileIndexes(ctx context.Context) error <span class="cov1" tit
 // LoginProfile the first time that subject is seen. name/email seed the new User doc on creation
 // only - a repeat call for an existing subject never overwrites them (profile edits are a
 // separate change's concern, see design.md).
-func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="13">{
+func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="15">{
         if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
-        }</span> else<span class="cov8" title="13"> if profile != nil </span><span class="cov4" title="3">{
+        }</span> else<span class="cov8" title="15"> if profile != nil </span><span class="cov1" title="1">{
                 return ProvisionResult{UserID: profile.UserID, Created: false}, nil
         }</span>
 
-        <span class="cov7" title="10">userID := uuid.New()
+        <span class="cov8" title="14">userID := uuid.New()
         user := userDoc{ID: userID, Name: name, Email: email}
         if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
         }</span>
 
-        <span class="cov7" title="10">profile := loginProfileDoc{
+        <span class="cov8" title="14">profile := loginProfileDoc{
                 ID:               uuid.New(),
                 UserID:           userID,
                 ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
                 ThirdPartyAuthID: subject,
         }
         _, err := database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
-        if err == nil </span><span class="cov4" title="3">{
+        if err == nil </span><span class="cov5" title="5">{
                 return ProvisionResult{UserID: userID, Created: true}, nil
         }</span>
-        <span class="cov6" title="7">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
+        <span class="cov7" title="9">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                 // ponytail: the userDoc insert above already committed, so a non-duplicate-key
                 // failure here leaves an orphaned User with no LoginProfile. Acceptable for now -
                 // revisit with a transaction if orphaned Users become a real problem.
@@ -798,17 +1011,17 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 
         // Lost the race: a concurrent first login for the same subject won. Its LoginProfile now
         // exists, so return its User.id instead of the one we just created.
-        <span class="cov6" title="7">existing, findErr := findLoginProfileBySubject(ctx, subject)
+        <span class="cov7" title="9">existing, findErr := findLoginProfileBySubject(ctx, subject)
         if findErr != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, findErr
         }</span>
-        <span class="cov6" title="7">if existing == nil </span><span class="cov0" title="0">{
+        <span class="cov7" title="9">if existing == nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
         }</span>
-        <span class="cov6" title="7">return ProvisionResult{UserID: existing.UserID, Created: false}, nil</span>
+        <span class="cov7" title="9">return ProvisionResult{UserID: existing.UserID, Created: false}, nil</span>
 }
 
-func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="20">{
+func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="27">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
@@ -817,17 +1030,17 @@ func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfi
 
         var profile loginProfileDoc
         err := database.Db.Collection(constants.LoginProfilesCollection).FindOne(ctx, filter).Decode(&amp;profile)
-        if err != nil </span><span class="cov7" title="10">{
-                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov7" title="10">{
+        if err != nil </span><span class="cov8" title="15">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="15">{
                         return nil, nil
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
         }
-        <span class="cov7" title="10">return &amp;profile, nil</span>
+        <span class="cov7" title="12">return &amp;profile, nil</span>
 }
 </pre>
 		
-		<pre class="file" id="file4" style="display: none">// Package models defines the persisted document shapes for users-api and the
+		<pre class="file" id="file5" style="display: none">// Package models defines the persisted document shapes for users-api and the
 // derived views built from them.
 package models
 
@@ -851,12 +1064,16 @@ var notSoftDeletedFilter = bson.D{
         }},
 }
 
-// userDoc is the users collection document shape, unchanged from the Swift
-// service's Fluent schema (UserModel.User).
+// userDoc is the users collection document shape. bio/website are additive fields beyond the
+// Swift service's original Fluent schema - missing on any pre-existing document, which the bson
+// driver decodes as the zero value (empty string), matching design.md's "no migration needed"
+// call.
 type userDoc struct {
-        ID    uuid.UUID `bson:"_id"`
-        Name  string    `bson:"name"`
-        Email string    `bson:"email"`
+        ID      uuid.UUID `bson:"_id"`
+        Name    string    `bson:"name"`
+        Email   string    `bson:"email"`
+        Bio     string    `bson:"bio"`
+        Website string    `bson:"website"`
 }
 
 // loginProfileDoc is the login_profiles collection document shape, unchanged
@@ -921,7 +1138,7 @@ func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) <span class
 }
 </pre>
 		
-		<pre class="file" id="file5" style="display: none">package server
+		<pre class="file" id="file6" style="display: none">package server
 
 import (
         "net/http"
@@ -939,18 +1156,18 @@ const (
         bearerPrefix = "Bearer "
 )
 
-func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov5" title="3">{
+func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov4" title="3">{
         logging.Logger.Info("Setting up admin users endpoint handlers...")
 
         g.GET("/api/admin/users", listUsersHandler(authzClient))
 }</span>
 
-func bearerToken(c *gin.Context) string <span class="cov10" title="8">{
+func bearerToken(c *gin.Context) string <span class="cov10" title="13">{
         auth := c.GetHeader("Authorization")
-        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov5" title="3">{
+        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov6" title="5">{
                 return ""
         }</span>
-        <span class="cov7" title="5">return strings.TrimPrefix(auth, bearerPrefix)</span>
+        <span class="cov8" title="8">return strings.TrimPrefix(auth, bearerPrefix)</span>
 }
 
 // List user identities.
@@ -967,15 +1184,15 @@ func bearerToken(c *gin.Context) string <span class="cov10" title="8">{
 //                @Failure                403                {object}        apiv.ErrorVO
 //                @Failure                500                {object}        apiv.ErrorVO
 //                @Router                        /api/admin/users [get]
-func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="3">{
-        return func(c *gin.Context) </span><span class="cov7" title="4">{
+func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov4" title="3">{
+        return func(c *gin.Context) </span><span class="cov5" title="4">{
                 token := bearerToken(c)
-                if token == "" </span><span class="cov4" title="2">{
+                if token == "" </span><span class="cov3" title="2">{
                         c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                         return
                 }</span>
 
-                <span class="cov4" title="2">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+                <span class="cov3" title="2">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
                 if err != nil </span><span class="cov1" title="1">{
                         if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov1" title="1">{
                                 c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
@@ -1002,20 +1219,6 @@ func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file6" style="display: none">package server
-
-import (
-        "github.com/gin-gonic/gin"
-        "github.com/sweetrpg/users-api/authz"
-)
-
-func SetupHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov0" title="0">{
-        setupAdminUsersHandlers(g, authzClient)
-        setupProvisionHandlers(g, authzClient)
-        setupStatusHandlers(g)
-}</span>
-</pre>
-		
 		<pre class="file" id="file7" style="display: none">package server
 
 import (
@@ -1026,6 +1229,212 @@ import (
         "github.com/sweetrpg/common.go/logging"
         "github.com/sweetrpg/users-api/authz"
         "github.com/sweetrpg/users-api/constants"
+)
+
+// resolveVerifiedSubject forwards the caller's bearer token to auth-api and returns the
+// verified Auth0 subject, with no role requirement - any authenticated identity may act on its
+// own data. Writes the appropriate error response and returns ok=false if resolution fails, so
+// callers can simply `if !ok { return }`.
+func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov10" title="9">{
+        token := bearerToken(c)
+        if token == "" </span><span class="cov5" title="3">{
+                c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
+                return "", false
+        }</span>
+
+        <span class="cov8" title="6">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+        if err != nil </span><span class="cov3" title="2">{
+                if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov3" title="2">{
+                        c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
+                        return "", false
+                }</span>
+                <span class="cov0" title="0">logging.Logger.Error("authz check failed", "error", err.Error())
+                c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
+                return "", false</span>
+        }
+        <span class="cov6" title="4">if !result.Allowed || result.Sub == "" </span><span class="cov1" title="1">{
+                c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller is not authorized"})
+                return "", false
+        }</span>
+
+        <span class="cov5" title="3">return result.Sub, true</span>
+}
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package server
+
+import (
+        "github.com/gin-gonic/gin"
+        "github.com/sweetrpg/users-api/authz"
+)
+
+func SetupHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov0" title="0">{
+        setupAdminUsersHandlers(g, authzClient)
+        setupProvisionHandlers(g, authzClient)
+        setupProfileHandlers(g, authzClient)
+        setupStatusHandlers(g)
+}</span>
+</pre>
+		
+		<pre class="file" id="file9" style="display: none">package server
+
+import (
+        "net/http"
+        "net/url"
+
+        "github.com/gin-gonic/gin"
+        apiv "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/users-api/authz"
+        "github.com/sweetrpg/users-api/models"
+)
+
+// bioMaxLength bounds bio to a reasonable profile-blurb size - see design.md's "fixed max
+// length" decision; the exact number is cosmetic, not part of the API contract.
+const bioMaxLength = 500
+
+type profileResponse struct {
+        Name    string `json:"name"`
+        Email   string `json:"email"`
+        Bio     string `json:"bio"`
+        Website string `json:"website"`
+}
+
+type updateProfileRequest struct {
+        Name    string `json:"name"`
+        Bio     string `json:"bio"`
+        Website string `json:"website"`
+}
+
+func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov8" title="5">{
+        logging.Logger.Info("Setting up self-service profile endpoint handlers...")
+
+        g.GET("/api/profile", getProfileHandler(authzClient))
+        g.PATCH("/api/profile", updateProfileHandler(authzClient))
+}</span>
+
+// Get the caller's own profile.
+//
+//         Resolved via the caller's own verified Auth0 subject - never a path or query parameter, so
+//         this route can only ever return the caller's own data.
+//                @Summary                Get the caller's own profile
+//                @Description        Get the caller's own profile
+//                @Tags                        profile
+//                @Produce                json
+//                @Success                200        {object}        profileResponse
+//                @Failure                401        {object}        apiv.ErrorVO
+//                @Failure                404        {object}        apiv.ErrorVO
+//                @Failure                500        {object}        apiv.ErrorVO
+//                @Router                        /api/profile [get]
+func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov8" title="5">{
+        return func(c *gin.Context) </span><span class="cov4" title="2">{
+                subject, ok := resolveVerifiedSubject(c, authzClient)
+                if !ok </span><span class="cov4" title="2">{
+                        return
+                }</span>
+
+                <span class="cov0" title="0">profile, err := models.FindProfileBySubject(c.Request.Context(), subject)
+                if err != nil </span><span class="cov0" title="0">{
+                        if err == models.ErrProfileNotFound </span><span class="cov0" title="0">{
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
+                                return
+                        }</span>
+                        <span class="cov0" title="0">logging.Logger.Error("Failed to fetch profile", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to fetch profile"})
+                        return</span>
+                }
+
+                <span class="cov0" title="0">c.JSON(http.StatusOK, profileResponse{
+                        Name: profile.Name, Email: profile.Email, Bio: profile.Bio, Website: profile.Website,
+                })</span>
+        }
+}
+
+// Update the caller's own profile.
+//
+//         Updates name/bio/website only - email is read-only, sourced from Auth0 at provisioning
+//         time (see design.md). Resolved via the caller's own verified Auth0 subject; a client
+//         cannot target any other user's record.
+//                @Summary                Update the caller's own profile
+//                @Description        Update the caller's own profile
+//                @Tags                        profile
+//                @Accept                        json
+//                @Produce                json
+//                @Param                        request        body                updateProfileRequest        true        "Profile update"
+//                @Success                200                {object}        profileResponse
+//                @Failure                400                {object}        apiv.ErrorVO
+//                @Failure                401                {object}        apiv.ErrorVO
+//                @Failure                404                {object}        apiv.ErrorVO
+//                @Failure                500                {object}        apiv.ErrorVO
+//                @Router                        /api/profile [patch]
+func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov8" title="5">{
+        return func(c *gin.Context) </span><span class="cov6" title="3">{
+                subject, ok := resolveVerifiedSubject(c, authzClient)
+                if !ok </span><span class="cov1" title="1">{
+                        return
+                }</span>
+
+                <span class="cov4" title="2">var req updateProfileRequest
+                if err := c.ShouldBindJSON(&amp;req); err != nil </span><span class="cov0" title="0">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid request body"})
+                        return
+                }</span>
+                <span class="cov4" title="2">if msg := validateProfileUpdate(req); msg != "" </span><span class="cov4" title="2">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: msg})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">existing, err := models.FindProfileBySubject(c.Request.Context(), subject)
+                if err != nil </span><span class="cov0" title="0">{
+                        if err == models.ErrProfileNotFound </span><span class="cov0" title="0">{
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
+                                return
+                        }</span>
+                        <span class="cov0" title="0">logging.Logger.Error("Failed to fetch profile", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to fetch profile"})
+                        return</span>
+                }
+
+                <span class="cov0" title="0">if err := models.UpdateProfile(c.Request.Context(), existing.UserID, req.Name, req.Bio, req.Website); err != nil </span><span class="cov0" title="0">{
+                        if err == models.ErrProfileNotFound </span><span class="cov0" title="0">{
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
+                                return
+                        }</span>
+                        <span class="cov0" title="0">logging.Logger.Error("Failed to update profile", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "update_failed", Message: "failed to update profile"})
+                        return</span>
+                }
+
+                <span class="cov0" title="0">c.JSON(http.StatusOK, profileResponse{
+                        Name: req.Name, Email: existing.Email, Bio: req.Bio, Website: req.Website,
+                })</span>
+        }
+}
+
+// validateProfileUpdate returns a user-facing message if req is invalid, or "" if valid.
+func validateProfileUpdate(req updateProfileRequest) string <span class="cov10" title="7">{
+        if len(req.Bio) &gt; bioMaxLength </span><span class="cov1" title="1">{
+                return "bio must be 500 characters or fewer"
+        }</span>
+        <span class="cov9" title="6">if req.Website != "" </span><span class="cov9" title="6">{
+                parsed, err := url.Parse(req.Website)
+                if err != nil || (parsed.Scheme != "http" &amp;&amp; parsed.Scheme != "https") || parsed.Host == "" </span><span class="cov8" title="5">{
+                        return "website must be a valid http(s):// URL"
+                }</span>
+        }
+        <span class="cov1" title="1">return ""</span>
+}
+</pre>
+		
+		<pre class="file" id="file10" style="display: none">package server
+
+import (
+        "net/http"
+
+        "github.com/gin-gonic/gin"
+        apiv "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/users-api/authz"
         "github.com/sweetrpg/users-api/models"
 )
 
@@ -1065,24 +1474,8 @@ func setupProvisionHandlers(g *gin.Engine, authzClient *authz.Client) <span clas
 //                @Router                        /internal/identities/provision [post]
 func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov10" title="4">{
         return func(c *gin.Context) </span><span class="cov10" title="4">{
-                token := bearerToken(c)
-                if token == "" </span><span class="cov1" title="1">{
-                        c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
-                        return
-                }</span>
-
-                <span class="cov8" title="3">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
-                if err != nil </span><span class="cov1" title="1">{
-                        if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov1" title="1">{
-                                c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
-                                return
-                        }</span>
-                        <span class="cov0" title="0">logging.Logger.Error("authz check failed", "error", err.Error())
-                        c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
-                        return</span>
-                }
-                <span class="cov5" title="2">if !result.Allowed || result.Sub == "" </span><span class="cov1" title="1">{
-                        c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller is not authorized"})
+                subject, ok := resolveVerifiedSubject(c, authzClient)
+                if !ok </span><span class="cov8" title="3">{
                         return
                 }</span>
 
@@ -1092,7 +1485,7 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
                         return
                 }</span>
 
-                <span class="cov0" title="0">provisionResult, err := models.FindOrCreateUser(c.Request.Context(), result.Sub, req.Name, req.Email)
+                <span class="cov0" title="0">provisionResult, err := models.FindOrCreateUser(c.Request.Context(), subject, req.Name, req.Email)
                 if err != nil </span><span class="cov0" title="0">{
                         logging.Logger.Error("Failed to provision user", "error", err.Error())
                         c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "provisioning_failed", Message: "failed to provision user"})
@@ -1104,7 +1497,7 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file8" style="display: none">package server
+		<pre class="file" id="file11" style="display: none">package server
 
 import (
         "net/http"
