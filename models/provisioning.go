@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/sweetrpg/mongodb.go/database"
@@ -113,21 +114,48 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 	return ProvisionResult{UserID: existing.UserID, Created: false}, nil
 }
 
+// findUserByEmail decodes leniently via bson.Raw rather than straight into userDoc: a legacy
+// document predating this Go service (e.g. a manually bootstrapped admin record, see auth-api's
+// AGENTS.md for the equivalent user_roles bootstrap procedure) can have `_id` stored as a plain
+// BSON string rather than this service's own binary uuid.UUID encoding - confirmed in dev, where
+// a real such document exists. A straight `.Decode(&userDoc{})` errors on that mismatch instead
+// of adopting the record.
 func findUserByEmail(ctx context.Context, email string) (*userDoc, error) {
 	filter := bson.D{{Key: "$and", Value: bson.A{
 		notSoftDeletedFilter,
 		bson.D{{Key: "email", Value: email}},
 	}}}
 
-	var user userDoc
-	err := database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&user)
+	var raw bson.Raw
+	err := database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&raw)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return &user, nil
+
+	id, err := decodeFlexibleUUID(raw.Lookup("_id"))
+	if err != nil {
+		return nil, fmt.Errorf("decoding legacy user _id for email %q: %w", email, err)
+	}
+
+	name, _ := raw.Lookup("name").StringValueOK()
+	docEmail, _ := raw.Lookup("email").StringValueOK()
+	return &userDoc{ID: id, Name: name, Email: docEmail}, nil
+}
+
+// decodeFlexibleUUID accepts both this service's own binary uuid.UUID encoding and a legacy
+// plain-string UUID.
+func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) {
+	if s, ok := v.StringValueOK(); ok {
+		return uuid.Parse(s)
+	}
+	var id uuid.UUID
+	if err := v.Unmarshal(&id); err != nil {
+		return uuid.UUID{}, err
+	}
+	return id, nil
 }
 
 func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) {
