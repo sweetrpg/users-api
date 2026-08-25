@@ -14,10 +14,6 @@ definitions:
         type: string
       name:
         type: string
-      subject:
-        type: string
-    required:
-    - subject
     type: object
   server.provisionResponse:
     properties:
@@ -101,7 +97,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Find or create a User/LoginProfile for an Auth0 subject
+      description: Find or create a User/LoginProfile for the caller's own Auth0 identity
       parameters:
       - description: Provisioning request
         in: body

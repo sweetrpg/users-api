@@ -1,21 +1,19 @@
 package server
 
 import (
-	"crypto/subtle"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	apiv "github.com/sweetrpg/api-core.go/vo"
 	"github.com/sweetrpg/common.go/logging"
+	"github.com/sweetrpg/users-api/authz"
+	"github.com/sweetrpg/users-api/constants"
 	"github.com/sweetrpg/users-api/models"
 )
 
-const internalServiceTokenHeader = "X-Internal-Service-Token"
-
 type provisionRequest struct {
-	Subject string `json:"subject" binding:"required"`
-	Name    string `json:"name"`
-	Email   string `json:"email"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 type provisionResponse struct {
@@ -23,31 +21,21 @@ type provisionResponse struct {
 	Created bool   `json:"created"`
 }
 
-func setupProvisionHandlers(g *gin.Engine, internalServiceToken string) {
+func setupProvisionHandlers(g *gin.Engine, authzClient *authz.Client) {
 	logging.Logger.Info("Setting up identity provisioning endpoint handlers...")
 
-	g.POST("/internal/identities/provision", requireInternalServiceToken(internalServiceToken), provisionHandler())
-}
-
-// requireInternalServiceToken gates a route on a shared-secret header, compared in constant
-// time. A blank configuredToken rejects every request rather than trusting an empty header.
-func requireInternalServiceToken(configuredToken string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		provided := c.GetHeader(internalServiceTokenHeader)
-		if configuredToken == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(configuredToken)) != 1 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
-			return
-		}
-		c.Next()
-	}
+	g.POST("/internal/identities/provision", provisionHandler(authzClient))
 }
 
 // Provision a User/LoginProfile record for a verified Auth0 identity.
 //
 //	 Find-or-create path called by auth-web during /auth/callback, after Auth0 token exchange
-//	 and the auth-api authz check both succeed. Requires the internal service token header.
+//	 and the auth-api authz check both succeed. Requires the caller's own Auth0 access token as
+//	 a bearer credential - verified against auth-api, same as GET /api/admin/users, rather than
+//	 a shared secret. The provisioned subject is the verified token's own sub, not a
+//	 client-supplied value, so a caller can only ever provision its own identity.
 //		@Summary		Provision a user identity
-//		@Description	Find or create a User/LoginProfile for an Auth0 subject
+//		@Description	Find or create a User/LoginProfile for the caller's own Auth0 identity
 //		@Tags			internal
 //		@Accept			json
 //		@Produce		json
@@ -57,21 +45,42 @@ func requireInternalServiceToken(configuredToken string) gin.HandlerFunc {
 //		@Failure		401		{object}	apiv.ErrorVO
 //		@Failure		500		{object}	apiv.ErrorVO
 //		@Router			/internal/identities/provision [post]
-func provisionHandler() gin.HandlerFunc {
+func provisionHandler(authzClient *authz.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req provisionRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "subject is required"})
+		token := bearerToken(c)
+		if token == "" {
+			c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
 			return
 		}
 
-		result, err := models.FindOrCreateUser(c.Request.Context(), req.Subject, req.Name, req.Email)
+		result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+		if err != nil {
+			if _, ok := err.(authz.InvalidTokenError); ok {
+				c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
+				return
+			}
+			logging.Logger.Error("authz check failed", "error", err.Error())
+			c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
+			return
+		}
+		if !result.Allowed || result.Sub == "" {
+			c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller is not authorized"})
+			return
+		}
+
+		var req provisionRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid request body"})
+			return
+		}
+
+		provisionResult, err := models.FindOrCreateUser(c.Request.Context(), result.Sub, req.Name, req.Email)
 		if err != nil {
 			logging.Logger.Error("Failed to provision user", "error", err.Error())
 			c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "provisioning_failed", Message: "failed to provision user"})
 			return
 		}
 
-		c.JSON(http.StatusOK, provisionResponse{UserID: result.UserID.String(), Created: result.Created})
+		c.JSON(http.StatusOK, provisionResponse{UserID: provisionResult.UserID.String(), Created: provisionResult.Created})
 	}
 }

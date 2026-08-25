@@ -67,7 +67,7 @@ const docTemplate = `{
         },
         "/internal/identities/provision": {
             "post": {
-                "description": "Find or create a User/LoginProfile for an Auth0 subject",
+                "description": "Find or create a User/LoginProfile for the caller's own Auth0 identity",
                 "consumes": [
                     "application/json"
                 ],
@@ -175,17 +175,11 @@ const docTemplate = `{
         },
         "server.provisionRequest": {
             "type": "object",
-            "required": [
-                "subject"
-            ],
             "properties": {
                 "email": {
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "subject": {
                     "type": "string"
                 }
             }

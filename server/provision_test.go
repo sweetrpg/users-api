@@ -8,49 +8,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sweetrpg/common.go/logging"
+	"github.com/sweetrpg/users-api/authz"
 )
 
-func newProvisionTestRouter(t *testing.T, configuredToken string) *gin.Engine {
+func newProvisionTestRouter(t *testing.T, authzBaseURL string) *gin.Engine {
 	t.Helper()
 	logging.Init()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.POST("/internal/identities/provision", requireInternalServiceToken(configuredToken), func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
+	setupProvisionHandlers(r, authz.NewClient(authzBaseURL))
 	return r
 }
 
-func TestRequireInternalServiceToken_RejectsMissingHeader(t *testing.T) {
-	r := newProvisionTestRouter(t, "s3cret")
-
-	req := httptest.NewRequest(http.MethodPost, "/internal/identities/provision", strings.NewReader(`{}`))
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-}
-
-func TestRequireInternalServiceToken_RejectsWrongToken(t *testing.T) {
-	r := newProvisionTestRouter(t, "s3cret")
-
-	req := httptest.NewRequest(http.MethodPost, "/internal/identities/provision", strings.NewReader(`{}`))
-	req.Header.Set(internalServiceTokenHeader, "wrong")
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-}
-
-func TestRequireInternalServiceToken_RejectsWhenUnconfigured(t *testing.T) {
+func TestProvision_RejectsMissingBearerToken(t *testing.T) {
 	r := newProvisionTestRouter(t, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/internal/identities/provision", strings.NewReader(`{}`))
-	req.Header.Set(internalServiceTokenHeader, "")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -59,27 +32,40 @@ func TestRequireInternalServiceToken_RejectsWhenUnconfigured(t *testing.T) {
 	}
 }
 
-func TestRequireInternalServiceToken_AllowsMatchingToken(t *testing.T) {
-	r := newProvisionTestRouter(t, "s3cret")
+func TestProvision_RejectsInvalidToken(t *testing.T) {
+	srv := newAuthzStub(t, authz.CheckResponse{}, http.StatusUnauthorized)
+	r := newProvisionTestRouter(t, srv.URL)
 
 	req := httptest.NewRequest(http.MethodPost, "/internal/identities/provision", strings.NewReader(`{}`))
-	req.Header.Set(internalServiceTokenHeader, "s3cret")
+	req.Header.Set("Authorization", "Bearer bad-token")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
 
-func TestProvisionHandler_RejectsMissingSubject(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	logging.Init()
-	r := gin.New()
-	r.POST("/internal/identities/provision", requireInternalServiceToken("s3cret"), provisionHandler())
+func TestProvision_RejectsWhenAuthzDenies(t *testing.T) {
+	srv := newAuthzStub(t, authz.CheckResponse{Allowed: false, Reason: "service_denied"}, http.StatusOK)
+	r := newProvisionTestRouter(t, srv.URL)
 
-	req := httptest.NewRequest(http.MethodPost, "/internal/identities/provision", strings.NewReader(`{"name":"a"}`))
-	req.Header.Set(internalServiceTokenHeader, "s3cret")
+	req := httptest.NewRequest(http.MethodPost, "/internal/identities/provision", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer good-token")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestProvision_RejectsInvalidBodyAfterAuthzSucceeds(t *testing.T) {
+	srv := newAuthzStub(t, authz.CheckResponse{Allowed: true, Roles: []string{authz.RoleUser}, Sub: "auth0|user-sub"}, http.StatusOK)
+	r := newProvisionTestRouter(t, srv.URL)
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/identities/provision", strings.NewReader(`not json`))
+	req.Header.Set("Authorization", "Bearer good-token")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)

@@ -69,7 +69,6 @@ func main() {
 	setupCORS(r)
 
 	checkAdminUsersAuthConfig()
-	checkInternalServiceTokenConfig()
 
 	setupMetrics(r)
 
@@ -87,7 +86,7 @@ func main() {
 	r.Use(RateLimiter())
 
 	authzClient := authz.NewClient(util.GetEnv(constants.AUTH_API_URL, ""))
-	server.SetupHandlers(r, authzClient, util.GetEnv(constants.INTERNAL_SERVICE_TOKEN, ""))
+	server.SetupHandlers(r, authzClient)
 
 	_ = r.Run(util.GetEnv(apiconstants.BIND_ADDRESS, ":8000"))
 }
@@ -103,21 +102,12 @@ func setupSwagger(r *gin.Engine) {
 }
 
 // checkAdminUsersAuthConfig warns at startup if AUTH_API_URL (for forwarded user
-// bearer tokens) is not configured, since that permanently disables GET
-// /api/admin/users (every request falls through to a 401) rather than
-// silently trusting an empty token.
+// bearer tokens) is not configured, since that permanently disables both GET
+// /api/admin/users and POST /internal/identities/provision (every request falls through to a
+// 401/503) rather than silently trusting an empty token.
 func checkAdminUsersAuthConfig() {
 	if util.GetEnv(constants.AUTH_API_URL, "") == "" {
-		logging.Logger.Warn("AUTH_API_URL not set, forwarded user bearer tokens cannot be verified for GET /api/admin/users")
-	}
-}
-
-// checkInternalServiceTokenConfig warns at startup if INTERNAL_SERVICE_TOKEN is not
-// configured, since that permanently disables POST /internal/identities/provision (every
-// request 401s) rather than accepting any header value.
-func checkInternalServiceTokenConfig() {
-	if util.GetEnv(constants.INTERNAL_SERVICE_TOKEN, "") == "" {
-		logging.Logger.Warn("INTERNAL_SERVICE_TOKEN not set, POST /internal/identities/provision will reject every request")
+		logging.Logger.Warn("AUTH_API_URL not set, forwarded user bearer tokens cannot be verified for GET /api/admin/users or POST /internal/identities/provision")
 	}
 }
 
