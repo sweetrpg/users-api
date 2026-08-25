@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/sweetrpg/common.go/logging"
 	"github.com/sweetrpg/mongodb.go/database"
 	"github.com/sweetrpg/users-api/constants"
@@ -31,6 +32,10 @@ func TestMain(m *testing.M) {
 		fmt.Println("failed to ensure login_profiles indexes:", err)
 		os.Exit(1)
 	}
+	if err := EnsureUserIndexes(context.Background()); err != nil {
+		fmt.Println("failed to ensure users indexes:", err)
+		os.Exit(1)
+	}
 
 	code := m.Run()
 
@@ -43,6 +48,13 @@ func cleanupSubject(t *testing.T, subject string) {
 	ctx := context.Background()
 	filter := bson.D{{Key: "thirdPartyAuthId", Value: subject}}
 	_, _ = database.Db.Collection(constants.LoginProfilesCollection).DeleteMany(ctx, filter)
+}
+
+func cleanupEmail(t *testing.T, email string) {
+	t.Helper()
+	ctx := context.Background()
+	filter := bson.D{{Key: "email", Value: email}}
+	_, _ = database.Db.Collection(constants.UsersCollection).DeleteMany(ctx, filter)
 }
 
 func TestFindOrCreateUser_NewSubjectCreatesUserAndLoginProfile(t *testing.T) {
@@ -126,5 +138,44 @@ func TestFindOrCreateUser_ConcurrentFirstLoginsDoNotDuplicate(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("login_profiles documents for subject = %d, want 1", count)
+	}
+}
+
+// TestFindOrCreateUser_AdoptsExistingUserWithSameEmail regression-tests a real dev incident: a
+// User document that predates the Auth0 login flow (no LoginProfile, e.g. a manually
+// bootstrapped admin record) collided with FindOrCreateUser's blind insert on the unique email
+// index, 500ing every first login for that email. The fix links a new LoginProfile to the
+// existing User instead of erroring on the collision.
+func TestFindOrCreateUser_AdoptsExistingUserWithSameEmail(t *testing.T) {
+	email := "legacy-" + t.Name() + "@example.com"
+	subject := "auth0|test-adopt-" + t.Name()
+	t.Cleanup(func() { cleanupSubject(t, subject) })
+	t.Cleanup(func() { cleanupEmail(t, email) })
+
+	legacyUserID := uuid.New()
+	_, err := database.Db.Collection(constants.UsersCollection).InsertOne(context.Background(),
+		userDoc{ID: legacyUserID, Name: "Legacy Admin", Email: email})
+	if err != nil {
+		t.Fatalf("seeding legacy user: %v", err)
+	}
+
+	result, err := FindOrCreateUser(context.Background(), subject, "New Name", email)
+	if err != nil {
+		t.Fatalf("FindOrCreateUser: %v", err)
+	}
+	if !result.Created {
+		t.Errorf("Created = false, want true - this subject is new, even though it adopted an existing User")
+	}
+	if result.UserID != legacyUserID {
+		t.Errorf("UserID = %v, want %v (the legacy User's own id)", result.UserID, legacyUserID)
+	}
+
+	count, err := database.Db.Collection(constants.UsersCollection).CountDocuments(context.Background(),
+		bson.D{{Key: "email", Value: email}})
+	if err != nil {
+		t.Fatalf("CountDocuments: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("users documents for email = %d, want 1 (no duplicate created)", count)
 	}
 }

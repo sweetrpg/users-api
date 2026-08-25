@@ -1,3 +1,16 @@
+## [0.8.0] - 2026-08-25
+
+### 🚀 Features
+
+- *(users-api)* Add self-service profile endpoints
+
+### 🐛 Bug Fixes
+
+- *(users-api)* Adopt existing User on email collision during provisioning
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.7.0
 ## [0.7.0] - 2026-08-25
 
 ### 🚀 Features

@@ -7,7 +7,6 @@ import (
 	apiv "github.com/sweetrpg/api-core.go/vo"
 	"github.com/sweetrpg/common.go/logging"
 	"github.com/sweetrpg/users-api/authz"
-	"github.com/sweetrpg/users-api/constants"
 	"github.com/sweetrpg/users-api/models"
 )
 
@@ -47,24 +46,8 @@ func setupProvisionHandlers(g *gin.Engine, authzClient *authz.Client) {
 //		@Router			/internal/identities/provision [post]
 func provisionHandler(authzClient *authz.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := bearerToken(c)
-		if token == "" {
-			c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
-			return
-		}
-
-		result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
-		if err != nil {
-			if _, ok := err.(authz.InvalidTokenError); ok {
-				c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
-				return
-			}
-			logging.Logger.Error("authz check failed", "error", err.Error())
-			c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
-			return
-		}
-		if !result.Allowed || result.Sub == "" {
-			c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller is not authorized"})
+		subject, ok := resolveVerifiedSubject(c, authzClient)
+		if !ok {
 			return
 		}
 
@@ -74,7 +57,7 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc {
 			return
 		}
 
-		provisionResult, err := models.FindOrCreateUser(c.Request.Context(), result.Sub, req.Name, req.Email)
+		provisionResult, err := models.FindOrCreateUser(c.Request.Context(), subject, req.Name, req.Email)
 		if err != nil {
 			logging.Logger.Error("Failed to provision user", "error", err.Error())
 			c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "provisioning_failed", Message: "failed to provision user"})

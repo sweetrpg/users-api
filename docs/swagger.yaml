@@ -8,6 +8,17 @@ definitions:
       subject:
         type: string
     type: object
+  server.profileResponse:
+    properties:
+      bio:
+        type: string
+      email:
+        type: string
+      name:
+        type: string
+      website:
+        type: string
+    type: object
   server.provisionRequest:
     properties:
       email:
@@ -20,6 +31,15 @@ definitions:
       created:
         type: boolean
       userId:
+        type: string
+    type: object
+  server.updateProfileRequest:
+    properties:
+      bio:
+        type: string
+      name:
+        type: string
+      website:
         type: string
     type: object
   vo.ErrorVO:
@@ -93,6 +113,68 @@ paths:
       summary: List user identities
       tags:
       - admin
+  /api/profile:
+    get:
+      description: Get the caller's own profile
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.profileResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: Get the caller's own profile
+      tags:
+      - profile
+    patch:
+      consumes:
+      - application/json
+      description: Update the caller's own profile
+      parameters:
+      - description: Profile update
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.updateProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.profileResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: Update the caller's own profile
+      tags:
+      - profile
   /internal/identities/provision:
     post:
       consumes:

@@ -65,6 +65,100 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/profile": {
+            "get": {
+                "description": "Get the caller's own profile",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "profile"
+                ],
+                "summary": "Get the caller's own profile",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.profileResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Update the caller's own profile",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "profile"
+                ],
+                "summary": "Update the caller's own profile",
+                "parameters": [
+                    {
+                        "description": "Profile update",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.updateProfileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.profileResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
         "/internal/identities/provision": {
             "post": {
                 "description": "Find or create a User/LoginProfile for the caller's own Auth0 identity",
@@ -173,6 +267,23 @@ const docTemplate = `{
                 }
             }
         },
+        "server.profileResponse": {
+            "type": "object",
+            "properties": {
+                "bio": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "website": {
+                    "type": "string"
+                }
+            }
+        },
         "server.provisionRequest": {
             "type": "object",
             "properties": {
@@ -191,6 +302,20 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "userId": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.updateProfileRequest": {
+            "type": "object",
+            "properties": {
+                "bio": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "website": {
                     "type": "string"
                 }
             }
