@@ -78,6 +78,9 @@ func main() {
 	if err := models.EnsureLoginProfileIndexes(context.Background()); err != nil {
 		logging.Logger.Error("Failed to ensure login_profiles indexes", "error", err.Error())
 	}
+	if err := models.EnsureUserIndexes(context.Background()); err != nil {
+		logging.Logger.Error("Failed to ensure users indexes", "error", err.Error())
+	}
 
 	setupAcuator(r)
 
