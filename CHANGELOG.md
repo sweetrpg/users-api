@@ -1,3 +1,9 @@
+## [0.8.2] - 2026-08-25
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.8.1
+- Set GOMEMLIMIT and GOGC on users-api deployment
 ## [0.8.1] - 2026-08-25
 
 ### 🐛 Bug Fixes
