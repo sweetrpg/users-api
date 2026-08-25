@@ -1,3 +1,12 @@
+## [0.8.1] - 2026-08-25
+
+### 🐛 Bug Fixes
+
+- *(users-api)* Tolerate legacy string-encoded UUID in users._id
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.8.0
 ## [0.8.0] - 2026-08-25
 
 ### 🚀 Features
