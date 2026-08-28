@@ -1,3 +1,12 @@
+## [0.8.4] - 2026-08-28
+
+### 🐛 Bug Fixes
+
+- *(routing)* Drop the redundant /api prefix from internal route registrations
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.8.3
 ## [0.8.3] - 2026-08-25
 
 ### ⚙️ Miscellaneous Tasks
