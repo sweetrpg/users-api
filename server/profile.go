@@ -31,8 +31,8 @@ type updateProfileRequest struct {
 func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) {
 	logging.Logger.Info("Setting up self-service profile endpoint handlers...")
 
-	g.GET("/api/profile", getProfileHandler(authzClient))
-	g.PATCH("/api/profile", updateProfileHandler(authzClient))
+	g.GET("/profile", getProfileHandler(authzClient))
+	g.PATCH("/profile", updateProfileHandler(authzClient))
 }
 
 // Get the caller's own profile.
@@ -47,7 +47,7 @@ func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) {
 //		@Failure		401	{object}	apiv.ErrorVO
 //		@Failure		404	{object}	apiv.ErrorVO
 //		@Failure		500	{object}	apiv.ErrorVO
-//		@Router			/api/profile [get]
+//		@Router			/profile [get]
 func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		subject, ok := resolveVerifiedSubject(c, authzClient)
@@ -58,6 +58,7 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 		profile, err := models.FindProfileBySubject(c.Request.Context(), subject)
 		if err != nil {
 			if err == models.ErrProfileNotFound {
+				logging.Logger.Warn("profile lookup found no User/LoginProfile for subject", "subject", subject)
 				c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
 				return
 			}
@@ -88,7 +89,7 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 //		@Failure		401		{object}	apiv.ErrorVO
 //		@Failure		404		{object}	apiv.ErrorVO
 //		@Failure		500		{object}	apiv.ErrorVO
-//		@Router			/api/profile [patch]
+//		@Router			/profile [patch]
 func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		subject, ok := resolveVerifiedSubject(c, authzClient)
