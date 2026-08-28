@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/sweetrpg/common.go/logging"
@@ -27,14 +28,20 @@ type Profile struct {
 	Website string
 }
 
-// userIDFilter matches _id against both this service's own binary uuid.UUID encoding and a
-// legacy plain-string UUID - see decodeFlexibleUUID's doc comment in provisioning.go. A User
-// document predating this Go service (a manually bootstrapped admin record, confirmed in dev)
-// can have `_id` stored as a plain BSON string; a bare equality filter with a binary uuid.UUID
-// value never matches such a document, so FindOrCreateUser's LoginProfile ends up pointing at a
-// User this filter alone couldn't find again.
+// userIDFilter matches _id against this service's own binary uuid.UUID encoding and both cases
+// of a legacy plain-string UUID - see decodeFlexibleUUID's doc comment in provisioning.go. A
+// User document predating this Go service (a manually bootstrapped admin record, confirmed in
+// dev) can have `_id` stored as a plain BSON string - specifically *uppercase*, matching Swift's
+// `UUID.uuidString` convention (the original Fluent-era service this data predates). A bare
+// equality filter with a binary uuid.UUID value, or even a lowercase string, never matches such
+// a document: confirmed live, where the stored `_id` was "B3384F5D-..." while this service's own
+// `uuid.UUID.String()` produces "b3384f5d-...". MongoDB string comparison is case-sensitive, so
+// both cases need to be listed explicitly.
 func userIDFilter(id uuid.UUID) bson.D {
-	return bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: bson.A{id, id.String()}}}}}
+	lower := id.String()
+	return bson.D{{Key: "_id", Value: bson.D{
+		{Key: "$in", Value: bson.A{id, lower, strings.ToUpper(lower)}},
+	}}}
 }
 
 // FindProfileBySubject resolves a verified Auth0 subject to its own Profile, via the same
