@@ -12,15 +12,10 @@ spec:
     - port: http
   selector:
     matchLabels:
-        platform: sweetrpg
-        app: api
-        # Matches the pod template's own label (deployment.yaml), not the overlay's
-        # kustomization-level `package: users` metadata label - these two intentionally differ
-        # (see deployment.yaml's selector) and only the pod template's value is what a
-        # PodMonitor's selector needs to match. Was "users" (plural) here, which never matched
-        # any pod, so this service was never actually scraped.
-        package: user
-        component: api
+        app.kubernetes.io/name: users-api
+        app.kubernetes.io/version: v1
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: users
   namespaceSelector:
     matchNames:
       - sweetrpg-users
