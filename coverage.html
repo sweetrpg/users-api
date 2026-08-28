@@ -73,9 +73,9 @@
 				
 				<option value="file8">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
 				
-				<option value="file9">github.com/sweetrpg/users-api/server/profile.go (46.0%)</option>
+				<option value="file9">github.com/sweetrpg/users-api/server/profile.go (45.1%)</option>
 				
-				<option value="file10">github.com/sweetrpg/users-api/server/provision.go (62.5%)</option>
+				<option value="file10">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
 				
 				<option value="file11">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
 				
@@ -494,7 +494,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/admin/users": {
+        "/admin/users": {
             "get": {
                 "description": "List user identities",
                 "produces": [
@@ -535,7 +535,59 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/profile": {
+        "/internal/identities/provision": {
+            "post": {
+                "description": "Find or create a User/LoginProfile for the caller's own Auth0 identity",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "internal"
+                ],
+                "summary": "Provision a user identity",
+                "parameters": [
+                    {
+                        "description": "Provisioning request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.provisionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.provisionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
+        "/profile": {
             "get": {
                 "description": "Get the caller's own profile",
                 "produces": [
@@ -616,58 +668,6 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/vo.ErrorVO"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/vo.ErrorVO"
-                        }
-                    }
-                }
-            }
-        },
-        "/internal/identities/provision": {
-            "post": {
-                "description": "Find or create a User/LoginProfile for the caller's own Auth0 identity",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "internal"
-                ],
-                "summary": "Provision a user identity",
-                "parameters": [
-                    {
-                        "description": "Provisioning request",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/server.provisionRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/server.provisionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/vo.ErrorVO"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/vo.ErrorVO"
                         }
@@ -1240,7 +1240,7 @@ const (
 func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov4" title="3">{
         logging.Logger.Info("Setting up admin users endpoint handlers...")
 
-        g.GET("/api/admin/users", listUsersHandler(authzClient))
+        g.GET("/admin/users", listUsersHandler(authzClient))
 }</span>
 
 func bearerToken(c *gin.Context) string <span class="cov10" title="13">{
@@ -1264,7 +1264,7 @@ func bearerToken(c *gin.Context) string <span class="cov10" title="13">{
 //                @Failure                401                {object}        apiv.ErrorVO
 //                @Failure                403                {object}        apiv.ErrorVO
 //                @Failure                500                {object}        apiv.ErrorVO
-//                @Router                        /api/admin/users [get]
+//                @Router                        /admin/users [get]
 func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov4" title="3">{
         return func(c *gin.Context) </span><span class="cov5" title="4">{
                 token := bearerToken(c)
@@ -1390,8 +1390,8 @@ type updateProfileRequest struct {
 func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov8" title="5">{
         logging.Logger.Info("Setting up self-service profile endpoint handlers...")
 
-        g.GET("/api/profile", getProfileHandler(authzClient))
-        g.PATCH("/api/profile", updateProfileHandler(authzClient))
+        g.GET("/profile", getProfileHandler(authzClient))
+        g.PATCH("/profile", updateProfileHandler(authzClient))
 }</span>
 
 // Get the caller's own profile.
@@ -1406,7 +1406,7 @@ func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) <span class=
 //                @Failure                401        {object}        apiv.ErrorVO
 //                @Failure                404        {object}        apiv.ErrorVO
 //                @Failure                500        {object}        apiv.ErrorVO
-//                @Router                        /api/profile [get]
+//                @Router                        /profile [get]
 func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov8" title="5">{
         return func(c *gin.Context) </span><span class="cov4" title="2">{
                 subject, ok := resolveVerifiedSubject(c, authzClient)
@@ -1417,6 +1417,7 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="c
                 <span class="cov0" title="0">profile, err := models.FindProfileBySubject(c.Request.Context(), subject)
                 if err != nil </span><span class="cov0" title="0">{
                         if err == models.ErrProfileNotFound </span><span class="cov0" title="0">{
+                                logging.Logger.Warn("profile lookup found no User/LoginProfile for subject", "subject", subject)
                                 c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
                                 return
                         }</span>
@@ -1447,7 +1448,7 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="c
 //                @Failure                401                {object}        apiv.ErrorVO
 //                @Failure                404                {object}        apiv.ErrorVO
 //                @Failure                500                {object}        apiv.ErrorVO
-//                @Router                        /api/profile [patch]
+//                @Router                        /profile [patch]
 func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov8" title="5">{
         return func(c *gin.Context) </span><span class="cov6" title="3">{
                 subject, ok := resolveVerifiedSubject(c, authzClient)
@@ -1539,7 +1540,7 @@ func setupProvisionHandlers(g *gin.Engine, authzClient *authz.Client) <span clas
 //
 //         Find-or-create path called by auth-web during /auth/callback, after Auth0 token exchange
 //         and the auth-api authz check both succeed. Requires the caller's own Auth0 access token as
-//         a bearer credential - verified against auth-api, same as GET /api/admin/users, rather than
+//         a bearer credential - verified against auth-api, same as GET /admin/users, rather than
 //         a shared secret. The provisioned subject is the verified token's own sub, not a
 //         client-supplied value, so a caller can only ever provision its own identity.
 //                @Summary                Provision a user identity
@@ -1573,7 +1574,9 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
                         return
                 }</span>
 
-                <span class="cov0" title="0">c.JSON(http.StatusOK, provisionResponse{UserID: provisionResult.UserID.String(), Created: provisionResult.Created})</span>
+                <span class="cov0" title="0">logging.Logger.Info("provisioned identity",
+                        "subject", subject, "userId", provisionResult.UserID.String(), "created", provisionResult.Created)
+                c.JSON(http.StatusOK, provisionResponse{UserID: provisionResult.UserID.String(), Created: provisionResult.Created})</span>
         }
 }
 </pre>
