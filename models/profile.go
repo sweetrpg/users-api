@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/sweetrpg/common.go/logging"
 	"github.com/sweetrpg/mongodb.go/database"
 	"github.com/sweetrpg/users-api/constants"
 	"go.mongodb.org/mongo-driver/bson"
@@ -42,11 +43,14 @@ func userIDFilter(id uuid.UUID) bson.D {
 func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error) {
 	loginProfile, err := findLoginProfileBySubject(ctx, subject)
 	if err != nil {
+		logging.Logger.Warn("findLoginProfileBySubject errored", "subject", subject, "error", err.Error())
 		return nil, err
 	}
 	if loginProfile == nil {
+		logging.Logger.Warn("step1: no LoginProfile found for subject", "subject", subject)
 		return nil, ErrProfileNotFound
 	}
+	logging.Logger.Info("step1: LoginProfile found", "subject", subject, "userId", loginProfile.UserID.String())
 
 	filter := bson.D{{Key: "$and", Value: bson.A{
 		notSoftDeletedFilter,
@@ -56,10 +60,13 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
 	err = database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&raw)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
+			logging.Logger.Warn("step2: no User doc matched userIDFilter", "subject", subject, "userId", loginProfile.UserID.String())
 			return nil, ErrProfileNotFound
 		}
+		logging.Logger.Warn("step2: User lookup errored", "subject", subject, "userId", loginProfile.UserID.String(), "error", err.Error())
 		return nil, err
 	}
+	logging.Logger.Info("step2: User doc found", "subject", subject, "userId", loginProfile.UserID.String())
 	id, err := decodeFlexibleUUID(raw.Lookup("_id"))
 	if err != nil {
 		return nil, fmt.Errorf("decoding legacy user _id for subject %q: %w", subject, err)
