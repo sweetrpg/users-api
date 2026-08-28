@@ -1,3 +1,12 @@
+## [0.8.6] - 2026-08-28
+
+### 💼 Other
+
+- *(profile)* Add step-level logging to pin down which lookup still fails
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.8.5
 ## [0.8.5] - 2026-08-28
 
 ### 🐛 Bug Fixes
