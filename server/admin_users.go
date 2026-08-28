@@ -19,7 +19,7 @@ const (
 func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) {
 	logging.Logger.Info("Setting up admin users endpoint handlers...")
 
-	g.GET("/api/admin/users", listUsersHandler(authzClient))
+	g.GET("/admin/users", listUsersHandler(authzClient))
 }
 
 func bearerToken(c *gin.Context) string {
@@ -43,7 +43,7 @@ func bearerToken(c *gin.Context) string {
 //		@Failure		401		{object}	apiv.ErrorVO
 //		@Failure		403		{object}	apiv.ErrorVO
 //		@Failure		500		{object}	apiv.ErrorVO
-//		@Router			/api/admin/users [get]
+//		@Router			/admin/users [get]
 func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerToken(c)

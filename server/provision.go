@@ -30,7 +30,7 @@ func setupProvisionHandlers(g *gin.Engine, authzClient *authz.Client) {
 //
 //	 Find-or-create path called by auth-web during /auth/callback, after Auth0 token exchange
 //	 and the auth-api authz check both succeed. Requires the caller's own Auth0 access token as
-//	 a bearer credential - verified against auth-api, same as GET /api/admin/users, rather than
+//	 a bearer credential - verified against auth-api, same as GET /admin/users, rather than
 //	 a shared secret. The provisioned subject is the verified token's own sub, not a
 //	 client-supplied value, so a caller can only ever provision its own identity.
 //		@Summary		Provision a user identity
@@ -64,6 +64,8 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc {
 			return
 		}
 
+		logging.Logger.Info("provisioned identity",
+			"subject", subject, "userId", provisionResult.UserID.String(), "created", provisionResult.Created)
 		c.JSON(http.StatusOK, provisionResponse{UserID: provisionResult.UserID.String(), Created: provisionResult.Created})
 	}
 }
