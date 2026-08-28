@@ -1,3 +1,12 @@
+## [0.8.5] - 2026-08-28
+
+### 🐛 Bug Fixes
+
+- *(profile)* Resolve legacy string-encoded User _id in profile fetch/update
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.8.4
 ## [0.8.4] - 2026-08-28
 
 ### 🐛 Bug Fixes
