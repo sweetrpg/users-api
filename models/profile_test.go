@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -114,5 +115,45 @@ func TestFindProfileBySubject_ResolvesLegacyUserWithStringID(t *testing.T) {
 
 	if err := UpdateProfile(context.Background(), legacyUserID, "Updated Name", "bio", "https://example.com"); err != nil {
 		t.Fatalf("UpdateProfile against a legacy string _id: %v", err)
+	}
+}
+
+// TestFindProfileBySubject_ResolvesLegacyUserWithUppercaseStringID regression-tests a real dev
+// incident found immediately after the fix above shipped: the actual legacy document's `_id` is
+// stored *uppercase* (matching Swift's `UUID.uuidString` convention, the Fluent-era service this
+// data predates), not lowercase like the previous test's seed data or Go's own
+// `uuid.UUID.String()`. MongoDB string comparison is case-sensitive, so the lowercase-only fix
+// still 404'd for this specific, real account.
+func TestFindProfileBySubject_ResolvesLegacyUserWithUppercaseStringID(t *testing.T) {
+	email := "legacy-uppercase-id-profile-" + t.Name() + "@example.com"
+	subject := "auth0|test-profile-uppercase-id-" + t.Name()
+	t.Cleanup(func() { cleanupSubject(t, subject) })
+	t.Cleanup(func() { cleanupEmail(t, email) })
+
+	legacyUserID := uuid.New()
+	_, err := database.Db.Collection(constants.UsersCollection).InsertOne(context.Background(),
+		bson.D{
+			{Key: "_id", Value: strings.ToUpper(legacyUserID.String())},
+			{Key: "name", Value: "Legacy Admin"},
+			{Key: "email", Value: email},
+		})
+	if err != nil {
+		t.Fatalf("seeding legacy user: %v", err)
+	}
+
+	if _, err := FindOrCreateUser(context.Background(), subject, "Legacy Admin", email); err != nil {
+		t.Fatalf("FindOrCreateUser: %v", err)
+	}
+
+	profile, err := FindProfileBySubject(context.Background(), subject)
+	if err != nil {
+		t.Fatalf("FindProfileBySubject: %v (uppercase legacy string _id should still resolve)", err)
+	}
+	if profile.UserID != legacyUserID {
+		t.Errorf("UserID = %v, want %v", profile.UserID, legacyUserID)
+	}
+
+	if err := UpdateProfile(context.Background(), legacyUserID, "Updated Name", "bio", "https://example.com"); err != nil {
+		t.Fatalf("UpdateProfile against an uppercase legacy string _id: %v", err)
 	}
 }
