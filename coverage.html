@@ -61,7 +61,7 @@
 				
 				<option value="file2">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
 				
-				<option value="file3">github.com/sweetrpg/users-api/models/profile.go (76.2%)</option>
+				<option value="file3">github.com/sweetrpg/users-api/models/profile.go (79.3%)</option>
 				
 				<option value="file4">github.com/sweetrpg/users-api/models/provisioning.go (78.3%)</option>
 				
@@ -865,6 +865,7 @@ func init() <span class="cov0" title="0">{
 import (
         "context"
         "errors"
+        "fmt"
 
         "github.com/google/uuid"
         "github.com/sweetrpg/mongodb.go/database"
@@ -887,43 +888,59 @@ type Profile struct {
         Website string
 }
 
+// userIDFilter matches _id against both this service's own binary uuid.UUID encoding and a
+// legacy plain-string UUID - see decodeFlexibleUUID's doc comment in provisioning.go. A User
+// document predating this Go service (a manually bootstrapped admin record, confirmed in dev)
+// can have `_id` stored as a plain BSON string; a bare equality filter with a binary uuid.UUID
+// value never matches such a document, so FindOrCreateUser's LoginProfile ends up pointing at a
+// User this filter alone couldn't find again.
+func userIDFilter(id uuid.UUID) bson.D <span class="cov10" title="6">{
+        return bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: bson.A{id, id.String()}}}}}
+}</span>
+
 // FindProfileBySubject resolves a verified Auth0 subject to its own Profile, via the same
 // LoginProfile join FindOrCreateUser uses. Returns ErrProfileNotFound if the subject has never
 // been provisioned.
-func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error) <span class="cov10" title="3">{
+func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error) <span class="cov7" title="4">{
         loginProfile, err := findLoginProfileBySubject(ctx, subject)
         if err != nil </span><span class="cov0" title="0">{
                 return nil, err
         }</span>
-        <span class="cov10" title="3">if loginProfile == nil </span><span class="cov1" title="1">{
+        <span class="cov7" title="4">if loginProfile == nil </span><span class="cov1" title="1">{
                 return nil, ErrProfileNotFound
         }</span>
 
-        <span class="cov6" title="2">filter := bson.D{{Key: "$and", Value: bson.A{
+        <span class="cov6" title="3">filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
-                bson.D{{Key: "_id", Value: loginProfile.UserID}},
+                userIDFilter(loginProfile.UserID),
         }}}
-        var user userDoc
-        err = database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;user)
+        var raw bson.Raw
+        err = database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;raw)
         if err != nil </span><span class="cov0" title="0">{
                 if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov0" title="0">{
                         return nil, ErrProfileNotFound
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
         }
+        <span class="cov6" title="3">id, err := decodeFlexibleUUID(raw.Lookup("_id"))
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("decoding legacy user _id for subject %q: %w", subject, err)
+        }</span>
+        <span class="cov6" title="3">name, _ := raw.Lookup("name").StringValueOK()
+        email, _ := raw.Lookup("email").StringValueOK()
+        bio, _ := raw.Lookup("bio").StringValueOK()
+        website, _ := raw.Lookup("website").StringValueOK()
 
-        <span class="cov6" title="2">return &amp;Profile{
-                UserID: user.ID, Name: user.Name, Email: user.Email, Bio: user.Bio, Website: user.Website,
-        }, nil</span>
+        return &amp;Profile{UserID: id, Name: name, Email: email, Bio: bio, Website: website}, nil</span>
 }
 
 // UpdateProfile updates name/bio/website for userID - email is never writable through this
 // path (see design.md's "email is read-only" decision). Returns ErrProfileNotFound if userID
 // doesn't match an existing, non-soft-deleted User.
-func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website string) error <span class="cov6" title="2">{
+func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website string) error <span class="cov6" title="3">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
-                bson.D{{Key: "_id", Value: userID}},
+                userIDFilter(userID),
         }}}
         update := bson.D{{Key: "$set", Value: bson.D{
                 {Key: "name", Value: name},
@@ -935,10 +952,10 @@ func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website str
         if err != nil </span><span class="cov0" title="0">{
                 return err
         }</span>
-        <span class="cov6" title="2">if result.MatchedCount == 0 </span><span class="cov1" title="1">{
+        <span class="cov6" title="3">if result.MatchedCount == 0 </span><span class="cov1" title="1">{
                 return ErrProfileNotFound
         }</span>
-        <span class="cov1" title="1">return nil</span>
+        <span class="cov4" title="2">return nil</span>
 }
 </pre>
 		
@@ -999,16 +1016,16 @@ func EnsureUserIndexes(ctx context.Context) error <span class="cov1" title="1">{
 // LoginProfile the first time that subject is seen. name/email seed the new User doc on creation
 // only - a repeat call for an existing subject never overwrites them (profile edits are a
 // separate change's concern, see design.md).
-func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="17">{
+func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="18">{
         if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
-        }</span> else<span class="cov8" title="17"> if profile != nil </span><span class="cov1" title="1">{
+        }</span> else<span class="cov8" title="18"> if profile != nil </span><span class="cov1" title="1">{
                 return ProvisionResult{UserID: profile.UserID, Created: false}, nil
         }</span>
 
-        <span class="cov8" title="16">userID := uuid.New()
+        <span class="cov8" title="17">userID := uuid.New()
         user := userDoc{ID: userID, Name: name, Email: email}
-        if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov8" title="15">{
+        if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov8" title="16">{
                 if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
                 }</span>
@@ -1019,24 +1036,24 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
                 // below still reflects whether this call is the one that newly links this *subject* -
                 // not whether the User document itself was newly inserted, matching the documented API
                 // contract ("repeat calls for an existing subject return created: false").
-                <span class="cov8" title="15">existingUser, findErr := findUserByEmail(ctx, email)
+                <span class="cov8" title="16">existingUser, findErr := findUserByEmail(ctx, email)
                 if findErr != nil </span><span class="cov0" title="0">{
                         return ProvisionResult{}, findErr
                 }</span>
-                <span class="cov8" title="15">if existingUser == nil </span><span class="cov0" title="0">{
+                <span class="cov8" title="16">if existingUser == nil </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
                 }</span>
-                <span class="cov8" title="15">userID = existingUser.ID</span>
+                <span class="cov8" title="16">userID = existingUser.ID</span>
         }
 
-        <span class="cov8" title="16">profile := loginProfileDoc{
+        <span class="cov8" title="17">profile := loginProfileDoc{
                 ID:               uuid.New(),
                 UserID:           userID,
                 ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
                 ThirdPartyAuthID: subject,
         }
         _, err := database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
-        if err == nil </span><span class="cov6" title="7">{
+        if err == nil </span><span class="cov6" title="8">{
                 return ProvisionResult{UserID: userID, Created: true}, nil
         }</span>
         <span class="cov6" title="9">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
@@ -1064,7 +1081,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 // BSON string rather than this service's own binary uuid.UUID encoding - confirmed in dev, where
 // a real such document exists. A straight `.Decode(&amp;userDoc{})` errors on that mismatch instead
 // of adopting the record.
-func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span class="cov8" title="15">{
+func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span class="cov8" title="16">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 bson.D{{Key: "email", Value: email}},
@@ -1079,30 +1096,30 @@ func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span 
                 <span class="cov0" title="0">return nil, err</span>
         }
 
-        <span class="cov8" title="15">id, err := decodeFlexibleUUID(raw.Lookup("_id"))
+        <span class="cov8" title="16">id, err := decodeFlexibleUUID(raw.Lookup("_id"))
         if err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("decoding legacy user _id for email %q: %w", email, err)
         }</span>
 
-        <span class="cov8" title="15">name, _ := raw.Lookup("name").StringValueOK()
+        <span class="cov8" title="16">name, _ := raw.Lookup("name").StringValueOK()
         docEmail, _ := raw.Lookup("email").StringValueOK()
         return &amp;userDoc{ID: id, Name: name, Email: docEmail}, nil</span>
 }
 
 // decodeFlexibleUUID accepts both this service's own binary uuid.UUID encoding and a legacy
 // plain-string UUID.
-func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov8" title="15">{
-        if s, ok := v.StringValueOK(); ok </span><span class="cov1" title="1">{
+func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov8" title="19">{
+        if s, ok := v.StringValueOK(); ok </span><span class="cov3" title="3">{
                 return uuid.Parse(s)
         }</span>
-        <span class="cov8" title="14">var id uuid.UUID
+        <span class="cov8" title="16">var id uuid.UUID
         if err := v.Unmarshal(&amp;id); err != nil </span><span class="cov0" title="0">{
                 return uuid.UUID{}, err
         }</span>
-        <span class="cov8" title="14">return id, nil</span>
+        <span class="cov8" title="16">return id, nil</span>
 }
 
-func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="29">{
+func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="31">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
@@ -1111,13 +1128,13 @@ func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfi
 
         var profile loginProfileDoc
         err := database.Db.Collection(constants.LoginProfilesCollection).FindOne(ctx, filter).Decode(&amp;profile)
-        if err != nil </span><span class="cov8" title="17">{
-                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="17">{
+        if err != nil </span><span class="cov8" title="18">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="18">{
                         return nil, nil
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
         }
-        <span class="cov7" title="12">return &amp;profile, nil</span>
+        <span class="cov7" title="13">return &amp;profile, nil</span>
 }
 </pre>
 		
