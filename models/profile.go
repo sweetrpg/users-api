@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/sweetrpg/mongodb.go/database"
@@ -25,6 +26,16 @@ type Profile struct {
 	Website string
 }
 
+// userIDFilter matches _id against both this service's own binary uuid.UUID encoding and a
+// legacy plain-string UUID - see decodeFlexibleUUID's doc comment in provisioning.go. A User
+// document predating this Go service (a manually bootstrapped admin record, confirmed in dev)
+// can have `_id` stored as a plain BSON string; a bare equality filter with a binary uuid.UUID
+// value never matches such a document, so FindOrCreateUser's LoginProfile ends up pointing at a
+// User this filter alone couldn't find again.
+func userIDFilter(id uuid.UUID) bson.D {
+	return bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: bson.A{id, id.String()}}}}}
+}
+
 // FindProfileBySubject resolves a verified Auth0 subject to its own Profile, via the same
 // LoginProfile join FindOrCreateUser uses. Returns ErrProfileNotFound if the subject has never
 // been provisioned.
@@ -39,20 +50,26 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
 
 	filter := bson.D{{Key: "$and", Value: bson.A{
 		notSoftDeletedFilter,
-		bson.D{{Key: "_id", Value: loginProfile.UserID}},
+		userIDFilter(loginProfile.UserID),
 	}}}
-	var user userDoc
-	err = database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&user)
+	var raw bson.Raw
+	err = database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&raw)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrProfileNotFound
 		}
 		return nil, err
 	}
+	id, err := decodeFlexibleUUID(raw.Lookup("_id"))
+	if err != nil {
+		return nil, fmt.Errorf("decoding legacy user _id for subject %q: %w", subject, err)
+	}
+	name, _ := raw.Lookup("name").StringValueOK()
+	email, _ := raw.Lookup("email").StringValueOK()
+	bio, _ := raw.Lookup("bio").StringValueOK()
+	website, _ := raw.Lookup("website").StringValueOK()
 
-	return &Profile{
-		UserID: user.ID, Name: user.Name, Email: user.Email, Bio: user.Bio, Website: user.Website,
-	}, nil
+	return &Profile{UserID: id, Name: name, Email: email, Bio: bio, Website: website}, nil
 }
 
 // UpdateProfile updates name/bio/website for userID - email is never writable through this
@@ -61,7 +78,7 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
 func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website string) error {
 	filter := bson.D{{Key: "$and", Value: bson.A{
 		notSoftDeletedFilter,
-		bson.D{{Key: "_id", Value: userID}},
+		userIDFilter(userID),
 	}}}
 	update := bson.D{{Key: "$set", Value: bson.D{
 		{Key: "name", Value: name},

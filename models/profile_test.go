@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/sweetrpg/mongodb.go/database"
+	"github.com/sweetrpg/users-api/constants"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 func TestFindProfileBySubject_ReturnsProvisionedFields(t *testing.T) {
@@ -67,5 +70,49 @@ func TestUpdateProfile_UnknownUserIDReturnsNotFound(t *testing.T) {
 	err := UpdateProfile(context.Background(), uuid.New(), "x", "y", "")
 	if err != ErrProfileNotFound {
 		t.Errorf("err = %v, want ErrProfileNotFound", err)
+	}
+}
+
+// TestFindProfileBySubject_ResolvesLegacyUserWithStringID regression-tests a real dev incident:
+// FindOrCreateUser's legacy-string-_id adoption (see
+// TestFindOrCreateUser_AdoptsLegacyUserWithStringID) links a new LoginProfile to that User's own
+// id - but FindProfileBySubject's own User lookup used a bare uuid.UUID equality filter, which
+// never matches a string-encoded _id. A caller could provision fine (created=false, found the
+// existing LoginProfile) and then get a 404 on every subsequent profile fetch for the same
+// subject, since the LoginProfile->User join couldn't find the User it just linked.
+func TestFindProfileBySubject_ResolvesLegacyUserWithStringID(t *testing.T) {
+	email := "legacy-string-id-profile-" + t.Name() + "@example.com"
+	subject := "auth0|test-profile-string-id-" + t.Name()
+	t.Cleanup(func() { cleanupSubject(t, subject) })
+	t.Cleanup(func() { cleanupEmail(t, email) })
+
+	legacyUserID := uuid.New()
+	_, err := database.Db.Collection(constants.UsersCollection).InsertOne(context.Background(),
+		bson.D{
+			{Key: "_id", Value: legacyUserID.String()},
+			{Key: "name", Value: "Legacy Admin"},
+			{Key: "email", Value: email},
+		})
+	if err != nil {
+		t.Fatalf("seeding legacy user: %v", err)
+	}
+
+	if _, err := FindOrCreateUser(context.Background(), subject, "Legacy Admin", email); err != nil {
+		t.Fatalf("FindOrCreateUser: %v", err)
+	}
+
+	profile, err := FindProfileBySubject(context.Background(), subject)
+	if err != nil {
+		t.Fatalf("FindProfileBySubject: %v (legacy string _id should still resolve)", err)
+	}
+	if profile.UserID != legacyUserID {
+		t.Errorf("UserID = %v, want %v", profile.UserID, legacyUserID)
+	}
+	if profile.Name != "Legacy Admin" || profile.Email != email {
+		t.Errorf("Name/Email = %q/%q, want Legacy Admin/%s", profile.Name, profile.Email, email)
+	}
+
+	if err := UpdateProfile(context.Background(), legacyUserID, "Updated Name", "bio", "https://example.com"); err != nil {
+		t.Fatalf("UpdateProfile against a legacy string _id: %v", err)
 	}
 }
