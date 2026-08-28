@@ -61,7 +61,7 @@
 				
 				<option value="file2">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
 				
-				<option value="file3">github.com/sweetrpg/users-api/models/profile.go (79.3%)</option>
+				<option value="file3">github.com/sweetrpg/users-api/models/profile.go (74.3%)</option>
 				
 				<option value="file4">github.com/sweetrpg/users-api/models/provisioning.go (78.3%)</option>
 				
@@ -868,6 +868,7 @@ import (
         "fmt"
 
         "github.com/google/uuid"
+        "github.com/sweetrpg/common.go/logging"
         "github.com/sweetrpg/mongodb.go/database"
         "github.com/sweetrpg/users-api/constants"
         "go.mongodb.org/mongo-driver/bson"
@@ -904,13 +905,16 @@ func userIDFilter(id uuid.UUID) bson.D <span class="cov10" title="6">{
 func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error) <span class="cov7" title="4">{
         loginProfile, err := findLoginProfileBySubject(ctx, subject)
         if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Warn("findLoginProfileBySubject errored", "subject", subject, "error", err.Error())
                 return nil, err
         }</span>
         <span class="cov7" title="4">if loginProfile == nil </span><span class="cov1" title="1">{
+                logging.Logger.Warn("step1: no LoginProfile found for subject", "subject", subject)
                 return nil, ErrProfileNotFound
         }</span>
+        <span class="cov6" title="3">logging.Logger.Info("step1: LoginProfile found", "subject", subject, "userId", loginProfile.UserID.String())
 
-        <span class="cov6" title="3">filter := bson.D{{Key: "$and", Value: bson.A{
+        filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 userIDFilter(loginProfile.UserID),
         }}}
@@ -918,11 +922,14 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
         err = database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;raw)
         if err != nil </span><span class="cov0" title="0">{
                 if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov0" title="0">{
+                        logging.Logger.Warn("step2: no User doc matched userIDFilter", "subject", subject, "userId", loginProfile.UserID.String())
                         return nil, ErrProfileNotFound
                 }</span>
-                <span class="cov0" title="0">return nil, err</span>
+                <span class="cov0" title="0">logging.Logger.Warn("step2: User lookup errored", "subject", subject, "userId", loginProfile.UserID.String(), "error", err.Error())
+                return nil, err</span>
         }
-        <span class="cov6" title="3">id, err := decodeFlexibleUUID(raw.Lookup("_id"))
+        <span class="cov6" title="3">logging.Logger.Info("step2: User doc found", "subject", subject, "userId", loginProfile.UserID.String())
+        id, err := decodeFlexibleUUID(raw.Lookup("_id"))
         if err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("decoding legacy user _id for subject %q: %w", subject, err)
         }</span>
