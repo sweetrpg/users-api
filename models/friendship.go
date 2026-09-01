@@ -77,14 +77,6 @@ func orderPair(x, y uuid.UUID) (a, b uuid.UUID) {
 	return y, x
 }
 
-// partyFilter matches a friendship document where caller is either party.
-func partyFilter(caller uuid.UUID) bson.D {
-	return bson.D{{Key: "$or", Value: bson.A{
-		bson.D{{Key: "userA", Value: caller}},
-		bson.D{{Key: "userB", Value: caller}},
-	}}}
-}
-
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
 // SendFriendRequest relies on to reject a duplicate request via a duplicate-key error rather
 // than a read-then-write check. Safe to call on every startup - CreateOne is idempotent for an
