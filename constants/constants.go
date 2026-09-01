@@ -36,4 +36,16 @@ const (
 	// an Auth0-issued login profile - the only third-party auth provider the
 	// platform uses today.
 	Auth0ThirdPartyAuth = "auth0"
+
+	// FriendshipsCollection is the MongoDB collection for friend-relationship
+	// documents - one document per unordered pair of User ids, see
+	// openspec/changes/add-users-api-friends in sweetrpg/platform.
+	FriendshipsCollection = "friendships"
+
+	// FriendshipStatusPending marks a request that the recipient has not yet
+	// accepted - not a friendship.
+	FriendshipStatusPending = "pending"
+
+	// FriendshipStatusAccepted marks a mutual, confirmed friendship.
+	FriendshipStatusAccepted = "accepted"
 )
