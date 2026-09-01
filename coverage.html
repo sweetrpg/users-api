@@ -61,27 +61,29 @@
 				
 				<option value="file2">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
 				
-				<option value="file3">github.com/sweetrpg/users-api/models/friendship.go (85.9%)</option>
+				<option value="file3">github.com/sweetrpg/users-api/models/friendship.go (86.6%)</option>
 				
-				<option value="file4">github.com/sweetrpg/users-api/models/profile.go (75.0%)</option>
+				<option value="file4">github.com/sweetrpg/users-api/models/profile.go (73.8%)</option>
 				
-				<option value="file5">github.com/sweetrpg/users-api/models/provisioning.go (78.3%)</option>
+				<option value="file5">github.com/sweetrpg/users-api/models/provisioning.go (79.7%)</option>
 				
 				<option value="file6">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
-				<option value="file7">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
+				<option value="file7">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
 				
-				<option value="file8">github.com/sweetrpg/users-api/server/authz_resolve.go (81.2%)</option>
+				<option value="file8">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
 				
-				<option value="file9">github.com/sweetrpg/users-api/server/friends.go (35.8%)</option>
+				<option value="file9">github.com/sweetrpg/users-api/server/authz_resolve.go (81.2%)</option>
 				
-				<option value="file10">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				<option value="file10">github.com/sweetrpg/users-api/server/friends.go (32.7%)</option>
 				
-				<option value="file11">github.com/sweetrpg/users-api/server/profile.go (45.1%)</option>
+				<option value="file11">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
 				
-				<option value="file12">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				<option value="file12">github.com/sweetrpg/users-api/server/profile.go (44.6%)</option>
 				
-				<option value="file13">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
+				<option value="file13">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				
+				<option value="file14">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
 				
 				</select>
 			</div>
@@ -873,6 +875,7 @@ import (
         "bytes"
         "context"
         "errors"
+        "strings"
         "time"
 
         "github.com/google/uuid"
@@ -901,7 +904,37 @@ var (
         // ErrRequestNotPending means accept/decline was attempted on an already-accepted
         // friendship, or remove on a still-pending one.
         ErrRequestNotPending = errors.New("models: friendship is not in the required state")
+        // ErrTargetNotFound means the identifier in a friend request (id, email, or username)
+        // matched no live user.
+        ErrTargetNotFound = errors.New("models: no user matches that identifier")
 )
+
+// ResolveFriendTarget turns a client-supplied identifier - a User.id, an email, or a username -
+// into the target user's id. Returns ErrTargetNotFound when nothing matches.
+func ResolveFriendTarget(ctx context.Context, identifier string) (uuid.UUID, error) <span class="cov8" title="9">{
+        id := strings.TrimSpace(identifier)
+        if id == "" </span><span class="cov3" title="2">{
+                return uuid.UUID{}, ErrTargetNotFound
+        }</span>
+
+        <span class="cov7" title="7">if parsed, err := uuid.Parse(id); err == nil </span><span class="cov3" title="2">{
+                exists, err := userExists(ctx, parsed)
+                if err != nil </span><span class="cov0" title="0">{
+                        return uuid.UUID{}, err
+                }</span>
+                <span class="cov3" title="2">if !exists </span><span class="cov1" title="1">{
+                        return uuid.UUID{}, ErrTargetNotFound
+                }</span>
+                <span class="cov1" title="1">return parsed, nil</span>
+        }
+
+        <span class="cov6" title="5">if strings.Contains(id, "@") </span><span class="cov3" title="2">{
+                // Email is matched exactly as stored (the unique index is case-sensitive); no lowering.
+                return FindUserIDByEmail(ctx, id)
+        }</span>
+        // Usernames are always lowercase by construction (see username.go).
+        <span class="cov4" title="3">return FindUserIDByUsername(ctx, strings.ToLower(id))</span>
+}
 
 // friendshipDoc is the friendships collection document shape. userA/userB are stored in a
 // canonical order (userA is the lexicographically smaller id) so the unique index on
@@ -940,10 +973,10 @@ type FriendRequest struct {
 // orderPair returns x and y sorted so the first return value is the lexicographically smaller
 // of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
 func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="13">{
-        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov8" title="9">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov6" title="5">{
                 return x, y
         }</span>
-        <span class="cov5" title="4">return y, x</span>
+        <span class="cov8" title="8">return y, x</span>
 }
 
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
@@ -1223,13 +1256,18 @@ import (
 // recent login (see add-users-api-provisioning's design.md).
 var ErrProfileNotFound = errors.New("models: profile not found")
 
+// ErrUsernameTaken means a profile update tried to set a username another user already holds
+// (the sparse unique index on users.username rejected the write).
+var ErrUsernameTaken = errors.New("models: username already taken")
+
 // Profile is the self-service view of a User's own record.
 type Profile struct {
-        UserID  uuid.UUID
-        Name    string
-        Email   string
-        Bio     string
-        Website string
+        UserID   uuid.UUID
+        Name     string
+        Email    string
+        Bio      string
+        Website  string
+        Username string
 }
 
 // userIDFilter matches _id against this service's own binary uuid.UUID encoding and both cases
@@ -1241,7 +1279,7 @@ type Profile struct {
 // a document: confirmed live, where the stored `_id` was "B3384F5D-..." while this service's own
 // `uuid.UUID.String()` produces "b3384f5d-...". MongoDB string comparison is case-sensitive, so
 // both cases need to be listed explicitly.
-func userIDFilter(id uuid.UUID) bson.D <span class="cov10" title="8">{
+func userIDFilter(id uuid.UUID) bson.D <span class="cov10" title="32">{
         lower := id.String()
         return bson.D{{Key: "_id", Value: bson.D{
                 {Key: "$in", Value: bson.A{id, lower, strings.ToUpper(lower)}},
@@ -1251,17 +1289,17 @@ func userIDFilter(id uuid.UUID) bson.D <span class="cov10" title="8">{
 // FindProfileBySubject resolves a verified Auth0 subject to its own Profile, via the same
 // LoginProfile join FindOrCreateUser uses. Returns ErrProfileNotFound if the subject has never
 // been provisioned.
-func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error) <span class="cov7" title="5">{
+func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error) <span class="cov5" title="5">{
         loginProfile, err := findLoginProfileBySubject(ctx, subject)
         if err != nil </span><span class="cov0" title="0">{
                 logging.Logger.Warn("findLoginProfileBySubject errored", "subject", subject, "error", err.Error())
                 return nil, err
         }</span>
-        <span class="cov7" title="5">if loginProfile == nil </span><span class="cov1" title="1">{
+        <span class="cov5" title="5">if loginProfile == nil </span><span class="cov1" title="1">{
                 logging.Logger.Warn("step1: no LoginProfile found for subject", "subject", subject)
                 return nil, ErrProfileNotFound
         }</span>
-        <span class="cov7" title="4">logging.Logger.Info("step1: LoginProfile found", "subject", subject, "userId", loginProfile.UserID.String())
+        <span class="cov4" title="4">logging.Logger.Info("step1: LoginProfile found", "subject", subject, "userId", loginProfile.UserID.String())
 
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
@@ -1277,41 +1315,53 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
                 <span class="cov0" title="0">logging.Logger.Warn("step2: User lookup errored", "subject", subject, "userId", loginProfile.UserID.String(), "error", err.Error())
                 return nil, err</span>
         }
-        <span class="cov7" title="4">logging.Logger.Info("step2: User doc found", "subject", subject, "userId", loginProfile.UserID.String())
+        <span class="cov4" title="4">logging.Logger.Info("step2: User doc found", "subject", subject, "userId", loginProfile.UserID.String())
         id, err := decodeFlexibleUUID(raw.Lookup("_id"))
         if err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("decoding legacy user _id for subject %q: %w", subject, err)
         }</span>
-        <span class="cov7" title="4">name, _ := raw.Lookup("name").StringValueOK()
+        <span class="cov4" title="4">name, _ := raw.Lookup("name").StringValueOK()
         email, _ := raw.Lookup("email").StringValueOK()
         bio, _ := raw.Lookup("bio").StringValueOK()
         website, _ := raw.Lookup("website").StringValueOK()
+        username, _ := raw.Lookup("username").StringValueOK()
 
-        return &amp;Profile{UserID: id, Name: name, Email: email, Bio: bio, Website: website}, nil</span>
+        return &amp;Profile{UserID: id, Name: name, Email: email, Bio: bio, Website: website, Username: username}, nil</span>
 }
 
-// UpdateProfile updates name/bio/website for userID - email is never writable through this
-// path (see design.md's "email is read-only" decision). Returns ErrProfileNotFound if userID
-// doesn't match an existing, non-soft-deleted User.
-func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website string) error <span class="cov7" title="4">{
+// UpdateProfile updates name/bio/website/username for userID - email is never writable through
+// this path (see design.md's "email is read-only" decision). Returns ErrProfileNotFound if
+// userID doesn't match an existing, non-soft-deleted User, or ErrUsernameTaken if username
+// collides with another user (the sparse unique index rejects the write).
+func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website, username string) error <span class="cov4" title="4">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 userIDFilter(userID),
         }}}
-        update := bson.D{{Key: "$set", Value: bson.D{
+        set := bson.D{
                 {Key: "name", Value: name},
                 {Key: "bio", Value: bio},
                 {Key: "website", Value: website},
-        }}}
+        }
+        // Only touch username when a value is given. Writing "" would land an empty string on the
+        // sparse unique index (which excludes only *missing* keys, not empty ones), so two cleared
+        // usernames would collide.
+        if username != "" </span><span class="cov1" title="1">{
+                set = append(set, bson.E{Key: "username", Value: username})
+        }</span>
+        <span class="cov4" title="4">update := bson.D{{Key: "$set", Value: set}}
 
         result, err := database.Db.Collection(constants.UsersCollection).UpdateOne(ctx, filter, update)
         if err != nil </span><span class="cov0" title="0">{
-                return err
-        }</span>
-        <span class="cov7" title="4">if result.MatchedCount == 0 </span><span class="cov1" title="1">{
+                if mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
+                        return ErrUsernameTaken
+                }</span>
+                <span class="cov0" title="0">return err</span>
+        }
+        <span class="cov4" title="4">if result.MatchedCount == 0 </span><span class="cov1" title="1">{
                 return ErrProfileNotFound
         }</span>
-        <span class="cov5" title="3">return nil</span>
+        <span class="cov3" title="3">return nil</span>
 }
 </pre>
 		
@@ -1323,6 +1373,7 @@ import (
         "fmt"
 
         "github.com/google/uuid"
+        "github.com/sweetrpg/common.go/logging"
         "github.com/sweetrpg/mongodb.go/database"
         "github.com/sweetrpg/users-api/constants"
         "go.mongodb.org/mongo-driver/bson"
@@ -1361,12 +1412,20 @@ func EnsureLoginProfileIndexes(ctx context.Context) error <span class="cov1" tit
 // every startup - CreateOne is idempotent for an identical index definition.
 func EnsureUserIndexes(ctx context.Context) error <span class="cov1" title="1">{
         collection := database.Db.Collection(constants.UsersCollection)
-        _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+        if _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
                 Keys:    bson.D{{Key: "email", Value: 1}},
                 Options: options.Index().SetUnique(true),
+        }); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        // Sparse so the many pre-existing user docs without a username (backfilled lazily, see
+        // username.go) don't all collide on a null key.
+        <span class="cov1" title="1">_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+                Keys:    bson.D{{Key: "username", Value: 1}},
+                Options: options.Index().SetUnique(true).SetSparse(true),
         })
-        return err
-}</span>
+        return err</span>
+}
 
 // FindOrCreateUser returns the User.id linked to subject's Auth0 login, creating a new User and
 // LoginProfile the first time that subject is seen. name/email seed the new User doc on creation
@@ -1376,11 +1435,20 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
         if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
         }</span> else<span class="cov8" title="19"> if profile != nil </span><span class="cov1" title="1">{
-                return ProvisionResult{UserID: profile.UserID, Created: false}, nil
-        }</span>
+                // Backfill a username for an existing user that predates the username field. Best
+                // effort - a failure here shouldn't block the login.
+                if err := EnsureUsername(ctx, profile.UserID, usernameSeed(email, name)); err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Warn("username backfill failed", "userId", profile.UserID.String(), "error", err.Error())
+                }</span>
+                <span class="cov1" title="1">return ProvisionResult{UserID: profile.UserID, Created: false}, nil</span>
+        }
 
         <span class="cov8" title="18">userID := uuid.New()
-        user := userDoc{ID: userID, Name: name, Email: email}
+        username, err := GenerateUsername(ctx, usernameSeed(email, name))
+        if err != nil </span><span class="cov0" title="0">{
+                return ProvisionResult{}, err
+        }</span>
+        <span class="cov8" title="18">user := userDoc{ID: userID, Name: name, Email: email, Username: username}
         if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov8" title="17">{
                 if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
@@ -1399,7 +1467,10 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
                 <span class="cov8" title="17">if existingUser == nil </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
                 }</span>
-                <span class="cov8" title="17">userID = existingUser.ID</span>
+                <span class="cov8" title="17">userID = existingUser.ID
+                if ensureErr := EnsureUsername(ctx, userID, usernameSeed(email, name)); ensureErr != nil </span><span class="cov3" title="3">{
+                        logging.Logger.Warn("username backfill failed for adopted user", "userId", userID.String(), "error", ensureErr.Error())
+                }</span>
         }
 
         <span class="cov8" title="18">profile := loginProfileDoc{
@@ -1408,7 +1479,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
                 ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
                 ThirdPartyAuthID: subject,
         }
-        _, err := database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
+        _, err = database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
         if err == nil </span><span class="cov6" title="9">{
                 return ProvisionResult{UserID: userID, Created: true}, nil
         }</span>
@@ -1437,7 +1508,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 // BSON string rather than this service's own binary uuid.UUID encoding - confirmed in dev, where
 // a real such document exists. A straight `.Decode(&amp;userDoc{})` errors on that mismatch instead
 // of adopting the record.
-func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span class="cov8" title="17">{
+func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span class="cov8" title="21">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notSoftDeletedFilter,
                 bson.D{{Key: "email", Value: email}},
@@ -1445,34 +1516,34 @@ func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span 
 
         var raw bson.Raw
         err := database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;raw)
-        if err != nil </span><span class="cov0" title="0">{
-                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov0" title="0">{
+        if err != nil </span><span class="cov2" title="2">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov2" title="2">{
                         return nil, nil
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
         }
 
-        <span class="cov8" title="17">id, err := decodeFlexibleUUID(raw.Lookup("_id"))
+        <span class="cov8" title="19">id, err := decodeFlexibleUUID(raw.Lookup("_id"))
         if err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("decoding legacy user _id for email %q: %w", email, err)
         }</span>
 
-        <span class="cov8" title="17">name, _ := raw.Lookup("name").StringValueOK()
+        <span class="cov8" title="19">name, _ := raw.Lookup("name").StringValueOK()
         docEmail, _ := raw.Lookup("email").StringValueOK()
         return &amp;userDoc{ID: id, Name: name, Email: docEmail}, nil</span>
 }
 
 // decodeFlexibleUUID accepts both this service's own binary uuid.UUID encoding and a legacy
 // plain-string UUID.
-func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov8" title="21">{
+func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov9" title="26">{
         if s, ok := v.StringValueOK(); ok </span><span class="cov5" title="5">{
                 return uuid.Parse(s)
         }</span>
-        <span class="cov8" title="16">var id uuid.UUID
+        <span class="cov8" title="21">var id uuid.UUID
         if err := v.Unmarshal(&amp;id); err != nil </span><span class="cov0" title="0">{
                 return uuid.UUID{}, err
         }</span>
-        <span class="cov8" title="16">return id, nil</span>
+        <span class="cov8" title="21">return id, nil</span>
 }
 
 func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="33">{
@@ -1518,16 +1589,17 @@ var notSoftDeletedFilter = bson.D{
         }},
 }
 
-// userDoc is the users collection document shape. bio/website are additive fields beyond the
-// Swift service's original Fluent schema - missing on any pre-existing document, which the bson
-// driver decodes as the zero value (empty string), matching design.md's "no migration needed"
-// call.
+// userDoc is the users collection document shape. bio/website/username are additive fields
+// beyond the Swift service's original Fluent schema - missing on any pre-existing document,
+// which the bson driver decodes as the zero value (empty string). username is backfilled lazily
+// (next login or profile edit) rather than by a batch migration; see username.go.
 type userDoc struct {
-        ID      uuid.UUID `bson:"_id"`
-        Name    string    `bson:"name"`
-        Email   string    `bson:"email"`
-        Bio     string    `bson:"bio"`
-        Website string    `bson:"website"`
+        ID       uuid.UUID `bson:"_id"`
+        Name     string    `bson:"name"`
+        Email    string    `bson:"email"`
+        Bio      string    `bson:"bio"`
+        Website  string    `bson:"website"`
+        Username string    `bson:"username,omitempty"`
 }
 
 // loginProfileDoc is the login_profiles collection document shape, unchanged
@@ -1592,7 +1664,202 @@ func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) <span class
 }
 </pre>
 		
-		<pre class="file" id="file7" style="display: none">package server
+		<pre class="file" id="file7" style="display: none">package models
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "regexp"
+        "strings"
+
+        "github.com/google/uuid"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+        "go.mongodb.org/mongo-driver/mongo"
+)
+
+// ErrUserNotFound means no live user matched a lookup by id, email, or username.
+var ErrUserNotFound = errors.New("models: user not found")
+
+const (
+        usernameMinLength = 3
+        usernameMaxLength = 30
+        // usernameCollisionTries bounds the -2, -3, ... suffixing GenerateUsername does before
+        // giving up. 50 is far more than any real collision cluster.
+        usernameCollisionTries = 50
+)
+
+// usernameFormat is the accepted shape for a user-chosen username: lowercase letters, digits,
+// underscore, hyphen, 3-30 chars. Generated usernames also satisfy it.
+var usernameFormat = regexp.MustCompile(`^[a-z0-9_-]{3,30}$`)
+
+var usernameStripRe = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+// ValidUsername reports whether s is an acceptable user-chosen username.
+func ValidUsername(s string) bool <span class="cov7" title="13">{
+        return usernameFormat.MatchString(s)
+}</span>
+
+// usernameSeed picks the string GenerateUsername derives a username from: the email (its local
+// part is used) when present, otherwise the display name.
+func usernameSeed(email, name string) string <span class="cov10" title="36">{
+        if strings.TrimSpace(email) != "" </span><span class="cov10" title="36">{
+                return email
+        }</span>
+        <span class="cov0" title="0">return name</span>
+}
+
+// slugifyUsername lowercases seed and reduces it to the allowed character set, collapsing runs
+// of disallowed characters to a single hyphen and trimming leading/trailing separators. A seed
+// that reduces to fewer than usernameMinLength usable characters is padded from a fixed base so
+// the result always satisfies usernameFormat.
+func slugifyUsername(seed string) string <span class="cov9" title="28">{
+        s := strings.ToLower(strings.TrimSpace(seed))
+        // An email seed: keep only the local part.
+        if at := strings.IndexByte(s, '@'); at &gt;= 0 </span><span class="cov8" title="24">{
+                s = s[:at]
+        }</span>
+        <span class="cov9" title="28">s = usernameStripRe.ReplaceAllString(s, "-")
+        s = strings.Trim(s, "-_")
+        if len(s) &lt; usernameMinLength </span><span class="cov1" title="1">{
+                s = (s + "user")[:usernameMinLength]
+        }</span>
+        <span class="cov9" title="28">if len(s) &gt; usernameMaxLength </span><span class="cov5" title="6">{
+                s = strings.Trim(s[:usernameMaxLength], "-_")
+        }</span>
+        <span class="cov9" title="28">return s</span>
+}
+
+// usernameTaken reports whether any live user already holds username.
+func usernameTaken(ctx context.Context, username string) (bool, error) <span class="cov8" title="24">{
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                bson.D{{Key: "username", Value: username}},
+        }}}
+        n, err := database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
+        return n &gt; 0, err
+}</span>
+
+// GenerateUsername returns a username derived from seed that no live user currently holds,
+// appending "-2", "-3", ... on collision. Returns an error only if the DB is unreachable or the
+// (very wide) collision bound is exhausted.
+func GenerateUsername(ctx context.Context, seed string) (string, error) <span class="cov8" title="22">{
+        base := slugifyUsername(seed)
+        for i := 1; i &lt;= usernameCollisionTries; i++ </span><span class="cov8" title="24">{
+                candidate := base
+                if i &gt; 1 </span><span class="cov2" title="2">{
+                        suffix := fmt.Sprintf("-%d", i)
+                        candidate = base
+                        if len(candidate)+len(suffix) &gt; usernameMaxLength </span><span class="cov0" title="0">{
+                                candidate = candidate[:usernameMaxLength-len(suffix)]
+                        }</span>
+                        <span class="cov2" title="2">candidate += suffix</span>
+                }
+                <span class="cov8" title="24">taken, err := usernameTaken(ctx, candidate)
+                if err != nil </span><span class="cov0" title="0">{
+                        return "", err
+                }</span>
+                <span class="cov8" title="24">if !taken </span><span class="cov8" title="22">{
+                        return candidate, nil
+                }</span>
+        }
+        <span class="cov0" title="0">return "", fmt.Errorf("models: no free username after %d tries for seed %q", usernameCollisionTries, seed)</span>
+}
+
+// EnsureUsername assigns a generated username to userID if it doesn't have one yet. A no-op for
+// a user that already has a username. Losing a race with a concurrent backfill (duplicate-key
+// on the write) is treated as success - the other writer set it.
+func EnsureUsername(ctx context.Context, userID uuid.UUID, seed string) error <span class="cov8" title="20">{
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                userIDFilter(userID),
+        }}}
+
+        var doc userDoc
+        err := database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;doc)
+        if err != nil </span><span class="cov3" title="3">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov0" title="0">{
+                        return ErrProfileNotFound
+                }</span>
+                <span class="cov3" title="3">return err</span>
+        }
+        <span class="cov8" title="17">if doc.Username != "" </span><span class="cov7" title="15">{
+                return nil
+        }</span>
+
+        <span class="cov2" title="2">username, err := GenerateUsername(ctx, seed)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov2" title="2">setFilter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                userIDFilter(userID),
+                bson.D{{Key: "$or", Value: bson.A{
+                        bson.D{{Key: "username", Value: bson.D{{Key: "$exists", Value: false}}}},
+                        bson.D{{Key: "username", Value: ""}},
+                }}},
+        }}}
+        update := bson.D{{Key: "$set", Value: bson.D{{Key: "username", Value: username}}}}
+        if _, err := database.Db.Collection(constants.UsersCollection).UpdateOne(ctx, setFilter, update); err != nil </span><span class="cov0" title="0">{
+                if mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
+                        return nil
+                }</span>
+                <span class="cov0" title="0">return err</span>
+        }
+        <span class="cov2" title="2">return nil</span>
+}
+
+// FindUserIDByUsername resolves a username to its live user's id, or ErrUserNotFound.
+func FindUserIDByUsername(ctx context.Context, username string) (uuid.UUID, error) <span class="cov5" title="5">{
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                bson.D{{Key: "username", Value: username}},
+        }}}
+
+        var raw bson.Raw
+        err := database.Db.Collection(constants.UsersCollection).FindOne(ctx, filter).Decode(&amp;raw)
+        if err != nil </span><span class="cov2" title="2">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov2" title="2">{
+                        return uuid.UUID{}, ErrUserNotFound
+                }</span>
+                <span class="cov0" title="0">return uuid.UUID{}, err</span>
+        }
+        <span class="cov3" title="3">id, err := decodeFlexibleUUID(raw.Lookup("_id"))
+        if err != nil </span><span class="cov0" title="0">{
+                return uuid.UUID{}, fmt.Errorf("decoding user _id for username %q: %w", username, err)
+        }</span>
+        <span class="cov3" title="3">return id, nil</span>
+}
+
+// FindUserIDByEmail resolves an email to its live user's id, or ErrUserNotFound. Reuses
+// findUserByEmail's lenient legacy-id decoding.
+func FindUserIDByEmail(ctx context.Context, email string) (uuid.UUID, error) <span class="cov4" title="4">{
+        user, err := findUserByEmail(ctx, email)
+        if err != nil </span><span class="cov0" title="0">{
+                return uuid.UUID{}, err
+        }</span>
+        <span class="cov4" title="4">if user == nil </span><span class="cov2" title="2">{
+                return uuid.UUID{}, ErrUserNotFound
+        }</span>
+        <span class="cov2" title="2">return user.ID, nil</span>
+}
+
+// userExists reports whether id names a live user - used to reject a friend request aimed at a
+// well-formed UUID that isn't anyone.
+func userExists(ctx context.Context, id uuid.UUID) (bool, error) <span class="cov2" title="2">{
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                userIDFilter(id),
+        }}}
+        n, err := database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
+        return n &gt; 0, err
+}</span>
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package server
 
 import (
         "net/http"
@@ -1673,7 +1940,7 @@ func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file8" style="display: none">package server
+		<pre class="file" id="file9" style="display: none">package server
 
 import (
         "net/http"
@@ -1715,7 +1982,7 @@ func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject 
 }
 </pre>
 		
-		<pre class="file" id="file9" style="display: none">package server
+		<pre class="file" id="file10" style="display: none">package server
 
 import (
         "context"
@@ -1731,7 +1998,9 @@ import (
 )
 
 type sendFriendRequestRequest struct {
-        UserID string `json:"user_id"`
+        // Identifier is a User.id, an email, or a username - resolved server-side to the target
+        // user (see models.ResolveFriendTarget).
+        Identifier string `json:"identifier"`
 }
 
 type friendRequestResponse struct {
@@ -1829,14 +2098,15 @@ func writeFriendshipError(c *gin.Context, action string, err error) <span class=
 
 // Send a friend request to another user.
 //
-//         The target is a User.id supplied in the request body. The caller is resolved from their
-//         own verified Auth0 subject, never a client-supplied value.
+//         The target is given as an identifier - a User.id, an email, or a username - resolved
+//         server-side. The caller is resolved from their own verified Auth0 subject, never a
+//         client-supplied value.
 //                @Summary                Send a friend request
-//                @Description        Send a friend request to another user by their User.id
+//                @Description        Send a friend request to another user, identified by User.id, email, or username
 //                @Tags                        friends
 //                @Accept                        json
 //                @Produce                json
-//                @Param                        request        body                sendFriendRequestRequest        true        "Target user"
+//                @Param                        request        body                sendFriendRequestRequest        true        "Target user identifier"
 //                @Success                201                {object}        friendRequestResponse
 //                @Failure                400                {object}        apiv.ErrorVO
 //                @Failure                401                {object}        apiv.ErrorVO
@@ -1856,9 +2126,8 @@ func sendFriendRequestHandler(authzClient *authz.Client) gin.HandlerFunc <span c
                         c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid request body"})
                         return
                 }</span>
-                <span class="cov3" title="2">target, err := uuid.Parse(req.UserID)
-                if err != nil </span><span class="cov3" title="2">{
-                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "user_id must be a valid UUID"})
+                <span class="cov3" title="2">if req.Identifier == "" </span><span class="cov3" title="2">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "identifier is required"})
                         return
                 }</span>
 
@@ -1866,6 +2135,17 @@ func sendFriendRequestHandler(authzClient *authz.Client) gin.HandlerFunc <span c
                 if !ok </span><span class="cov0" title="0">{
                         return
                 }</span>
+
+                <span class="cov0" title="0">target, err := models.ResolveFriendTarget(c.Request.Context(), req.Identifier)
+                if err != nil </span><span class="cov0" title="0">{
+                        if err == models.ErrTargetNotFound || err == models.ErrUserNotFound </span><span class="cov0" title="0">{
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no user found for that id, email, or username"})
+                                return
+                        }</span>
+                        <span class="cov0" title="0">logging.Logger.Error("Failed to resolve friend target", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to send friend request"})
+                        return</span>
+                }
 
                 <span class="cov0" title="0">friendship, err := models.SendFriendRequest(c.Request.Context(), caller, target)
                 if err != nil </span><span class="cov0" title="0">{
@@ -2028,7 +2308,7 @@ func listFriendRequestsHandler(authzClient *authz.Client) gin.HandlerFunc <span 
 }
 </pre>
 		
-		<pre class="file" id="file10" style="display: none">package server
+		<pre class="file" id="file11" style="display: none">package server
 
 import (
         "github.com/gin-gonic/gin"
@@ -2044,7 +2324,7 @@ func SetupHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov0" 
 }</span>
 </pre>
 		
-		<pre class="file" id="file11" style="display: none">package server
+		<pre class="file" id="file12" style="display: none">package server
 
 import (
         "net/http"
@@ -2063,20 +2343,22 @@ import (
 const bioMaxLength = 500
 
 type profileResponse struct {
-        UserID  uuid.UUID `json:"user_id"`
-        Name    string    `json:"name"`
-        Email   string    `json:"email"`
-        Bio     string    `json:"bio"`
-        Website string    `json:"website"`
+        UserID   uuid.UUID `json:"user_id"`
+        Name     string    `json:"name"`
+        Email    string    `json:"email"`
+        Bio      string    `json:"bio"`
+        Website  string    `json:"website"`
+        Username string    `json:"username"`
 }
 
 type updateProfileRequest struct {
-        Name    string `json:"name"`
-        Bio     string `json:"bio"`
-        Website string `json:"website"`
+        Name     string `json:"name"`
+        Bio      string `json:"bio"`
+        Website  string `json:"website"`
+        Username string `json:"username"`
 }
 
-func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov8" title="5">{
+func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov6" title="5">{
         logging.Logger.Info("Setting up self-service profile endpoint handlers...")
 
         g.GET("/profile", getProfileHandler(authzClient))
@@ -2096,10 +2378,10 @@ func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) <span class=
 //                @Failure                404        {object}        apiv.ErrorVO
 //                @Failure                500        {object}        apiv.ErrorVO
 //                @Router                        /profile [get]
-func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov8" title="5">{
-        return func(c *gin.Context) </span><span class="cov4" title="2">{
+func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov6" title="5">{
+        return func(c *gin.Context) </span><span class="cov3" title="2">{
                 subject, ok := resolveVerifiedSubject(c, authzClient)
-                if !ok </span><span class="cov4" title="2">{
+                if !ok </span><span class="cov3" title="2">{
                         return
                 }</span>
 
@@ -2116,16 +2398,18 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="c
                 }
 
                 <span class="cov0" title="0">c.JSON(http.StatusOK, profileResponse{
-                        UserID: profile.UserID, Name: profile.Name, Email: profile.Email, Bio: profile.Bio, Website: profile.Website,
+                        UserID: profile.UserID, Name: profile.Name, Email: profile.Email,
+                        Bio: profile.Bio, Website: profile.Website, Username: profile.Username,
                 })</span>
         }
 }
 
 // Update the caller's own profile.
 //
-//         Updates name/bio/website only - email is read-only, sourced from Auth0 at provisioning
-//         time (see design.md). Resolved via the caller's own verified Auth0 subject; a client
-//         cannot target any other user's record.
+//         Updates name/bio/website/username - email is read-only, sourced from Auth0 at provisioning
+//         time (see design.md). An empty username in the body leaves the existing one untouched.
+//         Resolved via the caller's own verified Auth0 subject; a client cannot target any other
+//         user's record.
 //                @Summary                Update the caller's own profile
 //                @Description        Update the caller's own profile
 //                @Tags                        profile
@@ -2136,21 +2420,22 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="c
 //                @Failure                400                {object}        apiv.ErrorVO
 //                @Failure                401                {object}        apiv.ErrorVO
 //                @Failure                404                {object}        apiv.ErrorVO
+//                @Failure                409                {object}        apiv.ErrorVO
 //                @Failure                500                {object}        apiv.ErrorVO
 //                @Router                        /profile [patch]
-func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov8" title="5">{
-        return func(c *gin.Context) </span><span class="cov6" title="3">{
+func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov6" title="5">{
+        return func(c *gin.Context) </span><span class="cov4" title="3">{
                 subject, ok := resolveVerifiedSubject(c, authzClient)
                 if !ok </span><span class="cov1" title="1">{
                         return
                 }</span>
 
-                <span class="cov4" title="2">var req updateProfileRequest
+                <span class="cov3" title="2">var req updateProfileRequest
                 if err := c.ShouldBindJSON(&amp;req); err != nil </span><span class="cov0" title="0">{
                         c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid request body"})
                         return
                 }</span>
-                <span class="cov4" title="2">if msg := validateProfileUpdate(req); msg != "" </span><span class="cov4" title="2">{
+                <span class="cov3" title="2">if msg := validateProfileUpdate(req); msg != "" </span><span class="cov3" title="2">{
                         c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: msg})
                         return
                 }</span>
@@ -2166,38 +2451,53 @@ func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class
                         return</span>
                 }
 
-                <span class="cov0" title="0">if err := models.UpdateProfile(c.Request.Context(), existing.UserID, req.Name, req.Bio, req.Website); err != nil </span><span class="cov0" title="0">{
-                        if err == models.ErrProfileNotFound </span><span class="cov0" title="0">{
-                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
-                                return
-                        }</span>
-                        <span class="cov0" title="0">logging.Logger.Error("Failed to update profile", "error", err.Error())
-                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "update_failed", Message: "failed to update profile"})
-                        return</span>
+                // An empty username in the body means "leave it as it is" - don't wipe a backfilled
+                // username just because the client didn't send one.
+                <span class="cov0" title="0">username := existing.Username
+                if req.Username != "" </span><span class="cov0" title="0">{
+                        username = req.Username
+                }</span>
+
+                <span class="cov0" title="0">if err := models.UpdateProfile(c.Request.Context(), existing.UserID, req.Name, req.Bio, req.Website, username); err != nil </span><span class="cov0" title="0">{
+                        switch err </span>{
+                        case models.ErrProfileNotFound:<span class="cov0" title="0">
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})</span>
+                        case models.ErrUsernameTaken:<span class="cov0" title="0">
+                                c.JSON(http.StatusConflict, apiv.ErrorVO{Error: "username_taken", Message: "that username is already taken"})</span>
+                        default:<span class="cov0" title="0">
+                                logging.Logger.Error("Failed to update profile", "error", err.Error())
+                                c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "update_failed", Message: "failed to update profile"})</span>
+                        }
+                        <span class="cov0" title="0">return</span>
                 }
 
                 <span class="cov0" title="0">c.JSON(http.StatusOK, profileResponse{
-                        UserID: existing.UserID, Name: req.Name, Email: existing.Email, Bio: req.Bio, Website: req.Website,
+                        UserID: existing.UserID, Name: req.Name, Email: existing.Email, Bio: req.Bio, Website: req.Website, Username: username,
                 })</span>
         }
 }
 
-// validateProfileUpdate returns a user-facing message if req is invalid, or "" if valid.
-func validateProfileUpdate(req updateProfileRequest) string <span class="cov10" title="7">{
+// validateProfileUpdate returns a user-facing message if req is invalid, or "" if valid. An
+// empty username is allowed (means "leave unchanged"); a non-empty one must match the accepted
+// format.
+func validateProfileUpdate(req updateProfileRequest) string <span class="cov10" title="16">{
         if len(req.Bio) &gt; bioMaxLength </span><span class="cov1" title="1">{
                 return "bio must be 500 characters or fewer"
         }</span>
-        <span class="cov9" title="6">if req.Website != "" </span><span class="cov9" title="6">{
+        <span class="cov9" title="15">if req.Website != "" </span><span class="cov6" title="6">{
                 parsed, err := url.Parse(req.Website)
-                if err != nil || (parsed.Scheme != "http" &amp;&amp; parsed.Scheme != "https") || parsed.Host == "" </span><span class="cov8" title="5">{
+                if err != nil || (parsed.Scheme != "http" &amp;&amp; parsed.Scheme != "https") || parsed.Host == "" </span><span class="cov6" title="5">{
                         return "website must be a valid http(s):// URL"
                 }</span>
         }
-        <span class="cov1" title="1">return ""</span>
+        <span class="cov8" title="10">if req.Username != "" &amp;&amp; !models.ValidUsername(req.Username) </span><span class="cov6" title="5">{
+                return "username must be 3-30 characters of lowercase letters, digits, hyphen, or underscore"
+        }</span>
+        <span class="cov6" title="5">return ""</span>
 }
 </pre>
 		
-		<pre class="file" id="file12" style="display: none">package server
+		<pre class="file" id="file13" style="display: none">package server
 
 import (
         "net/http"
@@ -2270,7 +2570,7 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file13" style="display: none">package server
+		<pre class="file" id="file14" style="display: none">package server
 
 import (
         "net/http"
