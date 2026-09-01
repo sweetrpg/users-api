@@ -1,3 +1,17 @@
+## [0.9.0] - 2026-09-01
+
+### 🚀 Features
+
+- *(profile)* Return canonical user id from profile endpoint
+- *(friends)* Friend request/accept/decline/remove model and endpoints
+
+### 🐛 Bug Fixes
+
+- *(friends)* Drop unused partyFilter helper
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.8.7
 ## [0.8.7] - 2026-08-28
 
 ### 🐛 Bug Fixes

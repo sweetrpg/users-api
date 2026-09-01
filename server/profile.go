@@ -5,6 +5,7 @@ import (
 	"net/url"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	apiv "github.com/sweetrpg/api-core.go/vo"
 	"github.com/sweetrpg/common.go/logging"
 	"github.com/sweetrpg/users-api/authz"
@@ -16,10 +17,11 @@ import (
 const bioMaxLength = 500
 
 type profileResponse struct {
-	Name    string `json:"name"`
-	Email   string `json:"email"`
-	Bio     string `json:"bio"`
-	Website string `json:"website"`
+	UserID  uuid.UUID `json:"user_id"`
+	Name    string    `json:"name"`
+	Email   string    `json:"email"`
+	Bio     string    `json:"bio"`
+	Website string    `json:"website"`
 }
 
 type updateProfileRequest struct {
@@ -68,7 +70,7 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, profileResponse{
-			Name: profile.Name, Email: profile.Email, Bio: profile.Bio, Website: profile.Website,
+			UserID: profile.UserID, Name: profile.Name, Email: profile.Email, Bio: profile.Bio, Website: profile.Website,
 		})
 	}
 }
@@ -129,7 +131,7 @@ func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, profileResponse{
-			Name: req.Name, Email: existing.Email, Bio: req.Bio, Website: req.Website,
+			UserID: existing.UserID, Name: req.Name, Email: existing.Email, Bio: req.Bio, Website: req.Website,
 		})
 	}
 }

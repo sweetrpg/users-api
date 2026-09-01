@@ -81,6 +81,9 @@ func main() {
 	if err := models.EnsureUserIndexes(context.Background()); err != nil {
 		logging.Logger.Error("Failed to ensure users indexes", "error", err.Error())
 	}
+	if err := models.EnsureFriendshipIndexes(context.Background()); err != nil {
+		logging.Logger.Error("Failed to ensure friendships indexes", "error", err.Error())
+	}
 
 	setupAcuator(r)
 
