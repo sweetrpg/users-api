@@ -61,23 +61,27 @@
 				
 				<option value="file2">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
 				
-				<option value="file3">github.com/sweetrpg/users-api/models/profile.go (75.0%)</option>
+				<option value="file3">github.com/sweetrpg/users-api/models/friendship.go (85.9%)</option>
 				
-				<option value="file4">github.com/sweetrpg/users-api/models/provisioning.go (78.3%)</option>
+				<option value="file4">github.com/sweetrpg/users-api/models/profile.go (75.0%)</option>
 				
-				<option value="file5">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
+				<option value="file5">github.com/sweetrpg/users-api/models/provisioning.go (78.3%)</option>
 				
-				<option value="file6">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
+				<option value="file6">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
-				<option value="file7">github.com/sweetrpg/users-api/server/authz_resolve.go (81.2%)</option>
+				<option value="file7">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
 				
-				<option value="file8">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				<option value="file8">github.com/sweetrpg/users-api/server/authz_resolve.go (81.2%)</option>
 				
-				<option value="file9">github.com/sweetrpg/users-api/server/profile.go (45.1%)</option>
+				<option value="file9">github.com/sweetrpg/users-api/server/friends.go (35.8%)</option>
 				
-				<option value="file10">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				<option value="file10">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
 				
-				<option value="file11">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
+				<option value="file11">github.com/sweetrpg/users-api/server/profile.go (45.1%)</option>
+				
+				<option value="file12">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				
+				<option value="file13">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
 				
 				</select>
 			</div>
@@ -290,6 +294,9 @@ func main() <span class="cov0" title="0">{
         }</span>
         <span class="cov0" title="0">if err := models.EnsureUserIndexes(context.Background()); err != nil </span><span class="cov0" title="0">{
                 logging.Logger.Error("Failed to ensure users indexes", "error", err.Error())
+        }</span>
+        <span class="cov0" title="0">if err := models.EnsureFriendshipIndexes(context.Background()); err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("Failed to ensure friendships indexes", "error", err.Error())
         }</span>
 
         <span class="cov0" title="0">setupAcuator(r)
@@ -863,6 +870,341 @@ func init() <span class="cov0" title="0">{
 		<pre class="file" id="file3" style="display: none">package models
 
 import (
+        "bytes"
+        "context"
+        "errors"
+        "time"
+
+        "github.com/google/uuid"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+        "go.mongodb.org/mongo-driver/mongo"
+        "go.mongodb.org/mongo-driver/mongo/options"
+)
+
+// Friendship-flow errors. Each maps to a distinct HTTP status in the handler layer; the model
+// never inspects the caller's identity beyond the party/requestedBy checks encoded here.
+var (
+        // ErrSelfRequest means the caller targeted their own User.id.
+        ErrSelfRequest = errors.New("models: cannot send a friend request to yourself")
+        // ErrDuplicateRequest means a pending or accepted friendship already exists for the pair,
+        // in either direction (the canonical-pair unique index rejected the insert).
+        ErrDuplicateRequest = errors.New("models: a friend request or friendship already exists for this pair")
+        // ErrFriendshipNotFound means no friendship document has the given id.
+        ErrFriendshipNotFound = errors.New("models: friendship not found")
+        // ErrNotAParty means the friendship exists but the caller is neither userA nor userB.
+        ErrNotAParty = errors.New("models: caller is not a party to this friendship")
+        // ErrCannotRespondOwnRequest means the caller is the original requester and so cannot
+        // accept or decline their own outgoing request.
+        ErrCannotRespondOwnRequest = errors.New("models: cannot accept or decline your own request")
+        // ErrRequestNotPending means accept/decline was attempted on an already-accepted
+        // friendship, or remove on a still-pending one.
+        ErrRequestNotPending = errors.New("models: friendship is not in the required state")
+)
+
+// friendshipDoc is the friendships collection document shape. userA/userB are stored in a
+// canonical order (userA is the lexicographically smaller id) so the unique index on
+// (userA, userB) rejects a duplicate request sent in either direction - see
+// add-users-api-friends design.md.
+type friendshipDoc struct {
+        ID          uuid.UUID `bson:"_id"`
+        UserA       uuid.UUID `bson:"userA"`
+        UserB       uuid.UUID `bson:"userB"`
+        Status      string    `bson:"status"`
+        RequestedBy uuid.UUID `bson:"requestedBy"`
+        CreatedAt   time.Time `bson:"createdAt"`
+        UpdatedAt   time.Time `bson:"updatedAt"`
+}
+
+// Friend is one entry in a caller's accepted-friend list: the other party's id, plus their
+// profile name/email when available.
+type Friend struct {
+        UserID uuid.UUID
+        Name   string
+        Email  string
+        Since  time.Time
+}
+
+// FriendRequest is one pending request involving the caller. Outgoing is true when the caller
+// is the one who sent it.
+type FriendRequest struct {
+        ID        uuid.UUID
+        UserID    uuid.UUID
+        Name      string
+        Email     string
+        Outgoing  bool
+        CreatedAt time.Time
+}
+
+// orderPair returns x and y sorted so the first return value is the lexicographically smaller
+// of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
+func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="13">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov7" title="6">{
+                return x, y
+        }</span>
+        <span class="cov7" title="7">return y, x</span>
+}
+
+// EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
+// SendFriendRequest relies on to reject a duplicate request via a duplicate-key error rather
+// than a read-then-write check. Safe to call on every startup - CreateOne is idempotent for an
+// identical index definition.
+func EnsureFriendshipIndexes(ctx context.Context) error <span class="cov1" title="1">{
+        collection := database.Db.Collection(constants.FriendshipsCollection)
+        _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+                Keys: bson.D{
+                        {Key: "userA", Value: 1},
+                        {Key: "userB", Value: 1},
+                },
+                Options: options.Index().SetUnique(true),
+        })
+        return err
+}</span>
+
+// SendFriendRequest creates a pending friendship from caller to target. Rejects a self-request
+// and, via the unique index, a duplicate for a pair that already has a pending request or an
+// accepted friendship in either direction.
+func SendFriendRequest(ctx context.Context, caller, target uuid.UUID) (*friendshipDoc, error) <span class="cov9" title="12">{
+        if caller == target </span><span class="cov1" title="1">{
+                return nil, ErrSelfRequest
+        }</span>
+
+        <span class="cov9" title="11">userA, userB := orderPair(caller, target)
+        now := time.Now().UTC()
+        doc := friendshipDoc{
+                ID:          uuid.New(),
+                UserA:       userA,
+                UserB:       userB,
+                Status:      constants.FriendshipStatusPending,
+                RequestedBy: caller,
+                CreatedAt:   now,
+                UpdatedAt:   now,
+        }
+
+        _, err := database.Db.Collection(constants.FriendshipsCollection).InsertOne(ctx, doc)
+        if err != nil </span><span class="cov3" title="2">{
+                if mongo.IsDuplicateKeyError(err) </span><span class="cov3" title="2">{
+                        return nil, ErrDuplicateRequest
+                }</span>
+                <span class="cov0" title="0">return nil, err</span>
+        }
+        <span class="cov8" title="9">return &amp;doc, nil</span>
+}
+
+// AcceptFriendRequest marks a pending request accepted. The caller must be a party to the
+// document and must not be the original requester. The state check is a single atomic
+// UpdateOne; a follow-up owner-agnostic read only runs to classify a miss (404 vs 403 vs 409)
+// and never re-opens a window to bypass the check.
+func AcceptFriendRequest(ctx context.Context, caller, id uuid.UUID) error <span class="cov7" title="6">{
+        filter := bson.D{
+                {Key: "_id", Value: id},
+                {Key: "status", Value: constants.FriendshipStatusPending},
+                {Key: "requestedBy", Value: bson.D{{Key: "$ne", Value: caller}}},
+                {Key: "$or", Value: bson.A{
+                        bson.D{{Key: "userA", Value: caller}},
+                        bson.D{{Key: "userB", Value: caller}},
+                }},
+        }
+        update := bson.D{{Key: "$set", Value: bson.D{
+                {Key: "status", Value: constants.FriendshipStatusAccepted},
+                {Key: "updatedAt", Value: time.Now().UTC()},
+        }}}
+
+        result, err := database.Db.Collection(constants.FriendshipsCollection).UpdateOne(ctx, filter, update)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov7" title="6">if result.MatchedCount == 0 </span><span class="cov4" title="3">{
+                return classifyRespondMiss(ctx, caller, id, constants.FriendshipStatusPending)
+        }</span>
+        <span class="cov4" title="3">return nil</span>
+}
+
+// DeclineFriendRequest deletes a pending request. Same caller checks as
+// AcceptFriendRequest - only the recipient may decline. Declining fully clears the pair so a
+// future request can be sent (the document is removed, not soft-deleted).
+func DeclineFriendRequest(ctx context.Context, caller, id uuid.UUID) error <span class="cov3" title="2">{
+        filter := bson.D{
+                {Key: "_id", Value: id},
+                {Key: "status", Value: constants.FriendshipStatusPending},
+                {Key: "requestedBy", Value: bson.D{{Key: "$ne", Value: caller}}},
+                {Key: "$or", Value: bson.A{
+                        bson.D{{Key: "userA", Value: caller}},
+                        bson.D{{Key: "userB", Value: caller}},
+                }},
+        }
+
+        result, err := database.Db.Collection(constants.FriendshipsCollection).DeleteOne(ctx, filter)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov3" title="2">if result.DeletedCount == 0 </span><span class="cov1" title="1">{
+                return classifyRespondMiss(ctx, caller, id, constants.FriendshipStatusPending)
+        }</span>
+        <span class="cov1" title="1">return nil</span>
+}
+
+// RemoveFriendship deletes an accepted friendship. Either party may remove it. A new request
+// can be sent afterward since the document is gone.
+func RemoveFriendship(ctx context.Context, caller, id uuid.UUID) error <span class="cov4" title="3">{
+        filter := bson.D{
+                {Key: "_id", Value: id},
+                {Key: "status", Value: constants.FriendshipStatusAccepted},
+                {Key: "$or", Value: bson.A{
+                        bson.D{{Key: "userA", Value: caller}},
+                        bson.D{{Key: "userB", Value: caller}},
+                }},
+        }
+
+        result, err := database.Db.Collection(constants.FriendshipsCollection).DeleteOne(ctx, filter)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov4" title="3">if result.DeletedCount == 0 </span><span class="cov3" title="2">{
+                return classifyRespondMiss(ctx, caller, id, constants.FriendshipStatusAccepted)
+        }</span>
+        <span class="cov1" title="1">return nil</span>
+}
+
+// classifyRespondMiss runs one owner-agnostic lookup by id to explain why an atomic
+// owner-scoped write matched nothing. wantStatus is the status the write required.
+func classifyRespondMiss(ctx context.Context, caller, id uuid.UUID, wantStatus string) error <span class="cov7" title="6">{
+        var doc friendshipDoc
+        err := database.Db.Collection(constants.FriendshipsCollection).
+                FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&amp;doc)
+        if err != nil </span><span class="cov1" title="1">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov1" title="1">{
+                        return ErrFriendshipNotFound
+                }</span>
+                <span class="cov0" title="0">return err</span>
+        }
+        <span class="cov6" title="5">if doc.UserA != caller &amp;&amp; doc.UserB != caller </span><span class="cov3" title="2">{
+                return ErrNotAParty
+        }</span>
+        <span class="cov4" title="3">if doc.Status != wantStatus </span><span class="cov1" title="1">{
+                return ErrRequestNotPending
+        }</span>
+        // Party, right status, but the write still missed - only remaining cause is the
+        // requestedBy != caller guard on accept/decline.
+        <span class="cov3" title="2">if doc.RequestedBy == caller </span><span class="cov3" title="2">{
+                return ErrCannotRespondOwnRequest
+        }</span>
+        <span class="cov0" title="0">return ErrFriendshipNotFound</span>
+}
+
+// ListFriends returns the caller's accepted friendships as the other party's id, enriched with
+// profile name/email when a users document exists.
+func ListFriends(ctx context.Context, caller uuid.UUID) ([]Friend, error) <span class="cov6" title="5">{
+        docs, err := database.Query[friendshipDoc](constants.FriendshipsCollection, bson.D{
+                {Key: "status", Value: constants.FriendshipStatusAccepted},
+                {Key: "$or", Value: bson.A{
+                        bson.D{{Key: "userA", Value: caller}},
+                        bson.D{{Key: "userB", Value: caller}},
+                }},
+        }, nil, nil, 0, 0)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov6" title="5">friends := make([]Friend, 0, len(docs))
+        otherIDs := make([]uuid.UUID, 0, len(docs))
+        for _, d := range docs </span><span class="cov3" title="2">{
+                other := d.UserB
+                if d.UserA != caller </span><span class="cov1" title="1">{
+                        other = d.UserA
+                }</span>
+                <span class="cov3" title="2">otherIDs = append(otherIDs, other)
+                friends = append(friends, Friend{UserID: other, Since: d.UpdatedAt})</span>
+        }
+
+        <span class="cov6" title="5">names := lookupUserSummaries(ctx, otherIDs)
+        for i := range friends </span><span class="cov3" title="2">{
+                if s, ok := names[friends[i].UserID]; ok </span><span class="cov0" title="0">{
+                        friends[i].Name = s.name
+                        friends[i].Email = s.email
+                }</span>
+        }
+        <span class="cov6" title="5">return friends, nil</span>
+}
+
+// ListPendingRequests returns every pending request the caller has sent or received, with
+// Outgoing set on the ones they sent.
+func ListPendingRequests(ctx context.Context, caller uuid.UUID) ([]FriendRequest, error) <span class="cov6" title="5">{
+        docs, err := database.Query[friendshipDoc](constants.FriendshipsCollection, bson.D{
+                {Key: "status", Value: constants.FriendshipStatusPending},
+                {Key: "$or", Value: bson.A{
+                        bson.D{{Key: "userA", Value: caller}},
+                        bson.D{{Key: "userB", Value: caller}},
+                }},
+        }, nil, nil, 0, 0)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov6" title="5">requests := make([]FriendRequest, 0, len(docs))
+        otherIDs := make([]uuid.UUID, 0, len(docs))
+        for _, d := range docs </span><span class="cov3" title="2">{
+                other := d.UserB
+                if d.UserA != caller </span><span class="cov1" title="1">{
+                        other = d.UserA
+                }</span>
+                <span class="cov3" title="2">otherIDs = append(otherIDs, other)
+                requests = append(requests, FriendRequest{
+                        ID:        d.ID,
+                        UserID:    other,
+                        Outgoing:  d.RequestedBy == caller,
+                        CreatedAt: d.CreatedAt,
+                })</span>
+        }
+
+        <span class="cov6" title="5">names := lookupUserSummaries(ctx, otherIDs)
+        for i := range requests </span><span class="cov3" title="2">{
+                if s, ok := names[requests[i].UserID]; ok </span><span class="cov0" title="0">{
+                        requests[i].Name = s.name
+                        requests[i].Email = s.email
+                }</span>
+        }
+        <span class="cov6" title="5">return requests, nil</span>
+}
+
+type userSummary struct {
+        name  string
+        email string
+}
+
+// lookupUserSummaries best-effort resolves ids to name/email from the users collection. A
+// missing document (or a decode failure on a legacy id shape) just yields no entry - callers
+// treat the enrichment as optional.
+func lookupUserSummaries(ctx context.Context, ids []uuid.UUID) map[uuid.UUID]userSummary <span class="cov9" title="10">{
+        out := make(map[uuid.UUID]userSummary, len(ids))
+        if len(ids) == 0 </span><span class="cov7" title="6">{
+                return out
+        }</span>
+
+        <span class="cov5" title="4">values := bson.A{}
+        for _, id := range ids </span><span class="cov5" title="4">{
+                values = append(values, id)
+        }</span>
+        <span class="cov5" title="4">filter := bson.D{{Key: "$and", Value: bson.A{
+                notSoftDeletedFilter,
+                bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: values}}}},
+        }}}
+
+        docs, err := database.Query[userDoc](constants.UsersCollection, filter, nil, nil, 0, 0)
+        if err != nil </span><span class="cov0" title="0">{
+                return out
+        }</span>
+        <span class="cov5" title="4">for _, d := range docs </span><span class="cov0" title="0">{
+                out[d.ID] = userSummary{name: d.Name, email: d.Email}
+        }</span>
+        <span class="cov5" title="4">return out</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package models
+
+import (
         "context"
         "errors"
         "fmt"
@@ -973,7 +1315,7 @@ func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website str
 }
 </pre>
 		
-		<pre class="file" id="file4" style="display: none">package models
+		<pre class="file" id="file5" style="display: none">package models
 
 import (
         "context"
@@ -1152,7 +1494,7 @@ func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfi
 }
 </pre>
 		
-		<pre class="file" id="file5" style="display: none">// Package models defines the persisted document shapes for users-api and the
+		<pre class="file" id="file6" style="display: none">// Package models defines the persisted document shapes for users-api and the
 // derived views built from them.
 package models
 
@@ -1250,7 +1592,7 @@ func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) <span class
 }
 </pre>
 		
-		<pre class="file" id="file6" style="display: none">package server
+		<pre class="file" id="file7" style="display: none">package server
 
 import (
         "net/http"
@@ -1268,18 +1610,18 @@ const (
         bearerPrefix = "Bearer "
 )
 
-func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov4" title="3">{
+func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov3" title="3">{
         logging.Logger.Info("Setting up admin users endpoint handlers...")
 
         g.GET("/admin/users", listUsersHandler(authzClient))
 }</span>
 
-func bearerToken(c *gin.Context) string <span class="cov10" title="13">{
+func bearerToken(c *gin.Context) string <span class="cov10" title="28">{
         auth := c.GetHeader("Authorization")
-        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov6" title="5">{
+        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov7" title="11">{
                 return ""
         }</span>
-        <span class="cov8" title="8">return strings.TrimPrefix(auth, bearerPrefix)</span>
+        <span class="cov8" title="17">return strings.TrimPrefix(auth, bearerPrefix)</span>
 }
 
 // List user identities.
@@ -1296,15 +1638,15 @@ func bearerToken(c *gin.Context) string <span class="cov10" title="13">{
 //                @Failure                403                {object}        apiv.ErrorVO
 //                @Failure                500                {object}        apiv.ErrorVO
 //                @Router                        /admin/users [get]
-func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov4" title="3">{
-        return func(c *gin.Context) </span><span class="cov5" title="4">{
+func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov3" title="3">{
+        return func(c *gin.Context) </span><span class="cov4" title="4">{
                 token := bearerToken(c)
-                if token == "" </span><span class="cov3" title="2">{
+                if token == "" </span><span class="cov2" title="2">{
                         c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                         return
                 }</span>
 
-                <span class="cov3" title="2">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+                <span class="cov2" title="2">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
                 if err != nil </span><span class="cov1" title="1">{
                         if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov1" title="1">{
                                 c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
@@ -1331,7 +1673,7 @@ func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file7" style="display: none">package server
+		<pre class="file" id="file8" style="display: none">package server
 
 import (
         "net/http"
@@ -1347,16 +1689,16 @@ import (
 // verified Auth0 subject, with no role requirement - any authenticated identity may act on its
 // own data. Writes the appropriate error response and returns ok=false if resolution fails, so
 // callers can simply `if !ok { return }`.
-func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov10" title="9">{
+func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov10" title="24">{
         token := bearerToken(c)
-        if token == "" </span><span class="cov5" title="3">{
+        if token == "" </span><span class="cov7" title="9">{
                 c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                 return "", false
         }</span>
 
-        <span class="cov8" title="6">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
-        if err != nil </span><span class="cov3" title="2">{
-                if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov3" title="2">{
+        <span class="cov8" title="15">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+        if err != nil </span><span class="cov6" title="8">{
+                if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov6" title="8">{
                         c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                         return "", false
                 }</span>
@@ -1364,16 +1706,329 @@ func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject 
                 c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
                 return "", false</span>
         }
-        <span class="cov6" title="4">if !result.Allowed || result.Sub == "" </span><span class="cov1" title="1">{
+        <span class="cov6" title="7">if !result.Allowed || result.Sub == "" </span><span class="cov1" title="1">{
                 c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller is not authorized"})
                 return "", false
         }</span>
 
-        <span class="cov5" title="3">return result.Sub, true</span>
+        <span class="cov6" title="6">return result.Sub, true</span>
 }
 </pre>
 		
-		<pre class="file" id="file8" style="display: none">package server
+		<pre class="file" id="file9" style="display: none">package server
+
+import (
+        "context"
+        "net/http"
+        "time"
+
+        "github.com/gin-gonic/gin"
+        "github.com/google/uuid"
+        apiv "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/users-api/authz"
+        "github.com/sweetrpg/users-api/models"
+)
+
+type sendFriendRequestRequest struct {
+        UserID string `json:"user_id"`
+}
+
+type friendRequestResponse struct {
+        ID     uuid.UUID `json:"id"`
+        UserID uuid.UUID `json:"user_id"`
+        Status string    `json:"status"`
+}
+
+type friendEntry struct {
+        UserID uuid.UUID `json:"user_id"`
+        Name   string    `json:"name"`
+        Email  string    `json:"email"`
+        Since  time.Time `json:"since"`
+}
+
+type friendsResponse struct {
+        Friends []friendEntry `json:"friends"`
+}
+
+type pendingRequestEntry struct {
+        ID        uuid.UUID `json:"id"`
+        UserID    uuid.UUID `json:"user_id"`
+        Name      string    `json:"name"`
+        Email     string    `json:"email"`
+        CreatedAt time.Time `json:"created_at"`
+}
+
+type pendingRequestsResponse struct {
+        Incoming []pendingRequestEntry `json:"incoming"`
+        Outgoing []pendingRequestEntry `json:"outgoing"`
+}
+
+func setupFriendsHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov5" title="3">{
+        logging.Logger.Info("Setting up self-service friends endpoint handlers...")
+
+        g.GET("/friends", listFriendsHandler(authzClient))
+        g.GET("/friends/requests", listFriendRequestsHandler(authzClient))
+        g.POST("/friends/requests", sendFriendRequestHandler(authzClient))
+        g.POST("/friends/requests/:id/accept", respondFriendRequestHandler(authzClient, models.AcceptFriendRequest))
+        g.POST("/friends/requests/:id/decline", respondFriendRequestHandler(authzClient, models.DeclineFriendRequest))
+        g.DELETE("/friends/:id", removeFriendHandler(authzClient))
+}</span>
+
+// resolveCallerUserID resolves the verified caller to their own User.id, writing the standard
+// 401/404/503 responses and returning ok=false on failure so handlers can `if !ok { return }`.
+func resolveCallerUserID(c *gin.Context, authzClient *authz.Client) (uuid.UUID, bool) <span class="cov10" title="10">{
+        subject, ok := resolveVerifiedSubject(c, authzClient)
+        if !ok </span><span class="cov10" title="10">{
+                return uuid.UUID{}, false
+        }</span>
+        <span class="cov0" title="0">return callerUserIDFromSubject(c, subject)</span>
+}
+
+// callerUserIDFromSubject resolves an already-verified Auth0 subject to its own User.id,
+// writing the standard 404/500 responses and returning ok=false on failure.
+func callerUserIDFromSubject(c *gin.Context, subject string) (uuid.UUID, bool) <span class="cov0" title="0">{
+        profile, err := models.FindProfileBySubject(c.Request.Context(), subject)
+        if err != nil </span><span class="cov0" title="0">{
+                if err == models.ErrProfileNotFound </span><span class="cov0" title="0">{
+                        c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
+                        return uuid.UUID{}, false
+                }</span>
+                <span class="cov0" title="0">logging.Logger.Error("Failed to resolve caller profile", "error", err.Error())
+                c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to resolve caller"})
+                return uuid.UUID{}, false</span>
+        }
+        <span class="cov0" title="0">return profile.UserID, true</span>
+}
+
+// friendshipIDParam parses the :id path parameter as a UUID, writing a 404 and returning
+// ok=false if it isn't one (an unparseable id can't match any friendship).
+func friendshipIDParam(c *gin.Context) (uuid.UUID, bool) <span class="cov0" title="0">{
+        id, err := uuid.Parse(c.Param("id"))
+        if err != nil </span><span class="cov0" title="0">{
+                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "friendship not found"})
+                return uuid.UUID{}, false
+        }</span>
+        <span class="cov0" title="0">return id, true</span>
+}
+
+// writeFriendshipError maps a models friendship-flow error to its HTTP status.
+func writeFriendshipError(c *gin.Context, action string, err error) <span class="cov0" title="0">{
+        switch err </span>{
+        case models.ErrFriendshipNotFound:<span class="cov0" title="0">
+                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "friendship not found"})</span>
+        case models.ErrNotAParty, models.ErrCannotRespondOwnRequest:<span class="cov0" title="0">
+                c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "not allowed to " + action + " this request"})</span>
+        case models.ErrRequestNotPending:<span class="cov0" title="0">
+                c.JSON(http.StatusConflict, apiv.ErrorVO{Error: "conflict", Message: "friendship is not in a state that can be " + action + "d"})</span>
+        default:<span class="cov0" title="0">
+                logging.Logger.Error("friendship "+action+" failed", "error", err.Error())
+                c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to " + action + " request"})</span>
+        }
+}
+
+// Send a friend request to another user.
+//
+//         The target is a User.id supplied in the request body. The caller is resolved from their
+//         own verified Auth0 subject, never a client-supplied value.
+//                @Summary                Send a friend request
+//                @Description        Send a friend request to another user by their User.id
+//                @Tags                        friends
+//                @Accept                        json
+//                @Produce                json
+//                @Param                        request        body                sendFriendRequestRequest        true        "Target user"
+//                @Success                201                {object}        friendRequestResponse
+//                @Failure                400                {object}        apiv.ErrorVO
+//                @Failure                401                {object}        apiv.ErrorVO
+//                @Failure                404                {object}        apiv.ErrorVO
+//                @Failure                409                {object}        apiv.ErrorVO
+//                @Failure                500                {object}        apiv.ErrorVO
+//                @Router                        /friends/requests [post]
+func sendFriendRequestHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="3">{
+        return func(c *gin.Context) </span><span class="cov7" title="5">{
+                subject, ok := resolveVerifiedSubject(c, authzClient)
+                if !ok </span><span class="cov3" title="2">{
+                        return
+                }</span>
+
+                <span class="cov5" title="3">var req sendFriendRequestRequest
+                if err := c.ShouldBindJSON(&amp;req); err != nil </span><span class="cov1" title="1">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid request body"})
+                        return
+                }</span>
+                <span class="cov3" title="2">target, err := uuid.Parse(req.UserID)
+                if err != nil </span><span class="cov3" title="2">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "user_id must be a valid UUID"})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">caller, ok := callerUserIDFromSubject(c, subject)
+                if !ok </span><span class="cov0" title="0">{
+                        return
+                }</span>
+
+                <span class="cov0" title="0">friendship, err := models.SendFriendRequest(c.Request.Context(), caller, target)
+                if err != nil </span><span class="cov0" title="0">{
+                        switch err </span>{
+                        case models.ErrSelfRequest:<span class="cov0" title="0">
+                                c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "cannot send a friend request to yourself"})</span>
+                        case models.ErrDuplicateRequest:<span class="cov0" title="0">
+                                c.JSON(http.StatusConflict, apiv.ErrorVO{Error: "conflict", Message: "a friend request or friendship already exists for this user"})</span>
+                        default:<span class="cov0" title="0">
+                                logging.Logger.Error("Failed to send friend request", "error", err.Error())
+                                c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to send friend request"})</span>
+                        }
+                        <span class="cov0" title="0">return</span>
+                }
+
+                <span class="cov0" title="0">c.JSON(http.StatusCreated, friendRequestResponse{ID: friendship.ID, UserID: target, Status: friendship.Status})</span>
+        }
+}
+
+// Respond to a pending friend request (accept or decline).
+//
+//         The caller must be a party to the request and must not be the user who sent it.
+//                @Summary                Respond to a pending friend request
+//                @Description        Accept or decline a pending friend request the caller received
+//                @Tags                        friends
+//                @Produce                json
+//                @Param                        id        path                string        true        "Friendship id"
+//                @Success                204
+//                @Failure                401        {object}        apiv.ErrorVO
+//                @Failure                403        {object}        apiv.ErrorVO
+//                @Failure                404        {object}        apiv.ErrorVO
+//                @Failure                409        {object}        apiv.ErrorVO
+//                @Failure                500        {object}        apiv.ErrorVO
+//                @Router                        /friends/requests/{id}/accept [post]
+func respondFriendRequestHandler(authzClient *authz.Client, respond func(context.Context, uuid.UUID, uuid.UUID) error) gin.HandlerFunc <span class="cov8" title="6">{
+        return func(c *gin.Context) </span><span class="cov6" title="4">{
+                caller, ok := resolveCallerUserID(c, authzClient)
+                if !ok </span><span class="cov6" title="4">{
+                        return
+                }</span>
+                <span class="cov0" title="0">id, ok := friendshipIDParam(c)
+                if !ok </span><span class="cov0" title="0">{
+                        return
+                }</span>
+
+                <span class="cov0" title="0">if err := respond(c.Request.Context(), caller, id); err != nil </span><span class="cov0" title="0">{
+                        writeFriendshipError(c, "respond to", err)
+                        return
+                }</span>
+                <span class="cov0" title="0">c.Status(http.StatusNoContent)</span>
+        }
+}
+
+// Remove an existing friendship.
+//
+//         Either party to an accepted friendship may remove it.
+//                @Summary                Remove a friendship
+//                @Description        Remove an existing accepted friendship
+//                @Tags                        friends
+//                @Produce                json
+//                @Param                        id        path                string        true        "Friendship id"
+//                @Success                204
+//                @Failure                401        {object}        apiv.ErrorVO
+//                @Failure                403        {object}        apiv.ErrorVO
+//                @Failure                404        {object}        apiv.ErrorVO
+//                @Failure                409        {object}        apiv.ErrorVO
+//                @Failure                500        {object}        apiv.ErrorVO
+//                @Router                        /friends/{id} [delete]
+func removeFriendHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="3">{
+        return func(c *gin.Context) </span><span class="cov3" title="2">{
+                caller, ok := resolveCallerUserID(c, authzClient)
+                if !ok </span><span class="cov3" title="2">{
+                        return
+                }</span>
+                <span class="cov0" title="0">id, ok := friendshipIDParam(c)
+                if !ok </span><span class="cov0" title="0">{
+                        return
+                }</span>
+
+                <span class="cov0" title="0">if err := models.RemoveFriendship(c.Request.Context(), caller, id); err != nil </span><span class="cov0" title="0">{
+                        writeFriendshipError(c, "remove", err)
+                        return
+                }</span>
+                <span class="cov0" title="0">c.Status(http.StatusNoContent)</span>
+        }
+}
+
+// List the caller's current friends.
+//
+//        @Summary                List friends
+//        @Description        List the caller's accepted mutual friendships
+//        @Tags                        friends
+//        @Produce                json
+//        @Success                200        {object}        friendsResponse
+//        @Failure                401        {object}        apiv.ErrorVO
+//        @Failure                404        {object}        apiv.ErrorVO
+//        @Failure                500        {object}        apiv.ErrorVO
+//        @Router                        /friends [get]
+func listFriendsHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="3">{
+        return func(c *gin.Context) </span><span class="cov3" title="2">{
+                caller, ok := resolveCallerUserID(c, authzClient)
+                if !ok </span><span class="cov3" title="2">{
+                        return
+                }</span>
+
+                <span class="cov0" title="0">friends, err := models.ListFriends(c.Request.Context(), caller)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to list friends", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to list friends"})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">entries := make([]friendEntry, 0, len(friends))
+                for _, f := range friends </span><span class="cov0" title="0">{
+                        entries = append(entries, friendEntry{UserID: f.UserID, Name: f.Name, Email: f.Email, Since: f.Since})
+                }</span>
+                <span class="cov0" title="0">c.JSON(http.StatusOK, friendsResponse{Friends: entries})</span>
+        }
+}
+
+// List the caller's pending friend requests, sent and received.
+//
+//        @Summary                List pending friend requests
+//        @Description        List the caller's pending friend requests, split into incoming and outgoing
+//        @Tags                        friends
+//        @Produce                json
+//        @Success                200        {object}        pendingRequestsResponse
+//        @Failure                401        {object}        apiv.ErrorVO
+//        @Failure                404        {object}        apiv.ErrorVO
+//        @Failure                500        {object}        apiv.ErrorVO
+//        @Router                        /friends/requests [get]
+func listFriendRequestsHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="3">{
+        return func(c *gin.Context) </span><span class="cov3" title="2">{
+                caller, ok := resolveCallerUserID(c, authzClient)
+                if !ok </span><span class="cov3" title="2">{
+                        return
+                }</span>
+
+                <span class="cov0" title="0">requests, err := models.ListPendingRequests(c.Request.Context(), caller)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to list friend requests", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to list friend requests"})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">resp := pendingRequestsResponse{
+                        Incoming: make([]pendingRequestEntry, 0),
+                        Outgoing: make([]pendingRequestEntry, 0),
+                }
+                for _, r := range requests </span><span class="cov0" title="0">{
+                        entry := pendingRequestEntry{ID: r.ID, UserID: r.UserID, Name: r.Name, Email: r.Email, CreatedAt: r.CreatedAt}
+                        if r.Outgoing </span><span class="cov0" title="0">{
+                                resp.Outgoing = append(resp.Outgoing, entry)
+                        }</span> else<span class="cov0" title="0"> {
+                                resp.Incoming = append(resp.Incoming, entry)
+                        }</span>
+                }
+                <span class="cov0" title="0">c.JSON(http.StatusOK, resp)</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file10" style="display: none">package server
 
 import (
         "github.com/gin-gonic/gin"
@@ -1384,11 +2039,12 @@ func SetupHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov0" 
         setupAdminUsersHandlers(g, authzClient)
         setupProvisionHandlers(g, authzClient)
         setupProfileHandlers(g, authzClient)
+        setupFriendsHandlers(g, authzClient)
         setupStatusHandlers(g)
 }</span>
 </pre>
 		
-		<pre class="file" id="file9" style="display: none">package server
+		<pre class="file" id="file11" style="display: none">package server
 
 import (
         "net/http"
@@ -1541,7 +2197,7 @@ func validateProfileUpdate(req updateProfileRequest) string <span class="cov10" 
 }
 </pre>
 		
-		<pre class="file" id="file10" style="display: none">package server
+		<pre class="file" id="file12" style="display: none">package server
 
 import (
         "net/http"
@@ -1614,7 +2270,7 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file11" style="display: none">package server
+		<pre class="file" id="file13" style="display: none">package server
 
 import (
         "net/http"
