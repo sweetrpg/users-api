@@ -36,6 +36,10 @@ func TestMain(m *testing.M) {
 		fmt.Println("failed to ensure users indexes:", err)
 		os.Exit(1)
 	}
+	if err := EnsureFriendshipIndexes(context.Background()); err != nil {
+		fmt.Println("failed to ensure friendships indexes:", err)
+		os.Exit(1)
+	}
 
 	code := m.Run()
 
