@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,7 +33,37 @@ var (
 	// ErrRequestNotPending means accept/decline was attempted on an already-accepted
 	// friendship, or remove on a still-pending one.
 	ErrRequestNotPending = errors.New("models: friendship is not in the required state")
+	// ErrTargetNotFound means the identifier in a friend request (id, email, or username)
+	// matched no live user.
+	ErrTargetNotFound = errors.New("models: no user matches that identifier")
 )
+
+// ResolveFriendTarget turns a client-supplied identifier - a User.id, an email, or a username -
+// into the target user's id. Returns ErrTargetNotFound when nothing matches.
+func ResolveFriendTarget(ctx context.Context, identifier string) (uuid.UUID, error) {
+	id := strings.TrimSpace(identifier)
+	if id == "" {
+		return uuid.UUID{}, ErrTargetNotFound
+	}
+
+	if parsed, err := uuid.Parse(id); err == nil {
+		exists, err := userExists(ctx, parsed)
+		if err != nil {
+			return uuid.UUID{}, err
+		}
+		if !exists {
+			return uuid.UUID{}, ErrTargetNotFound
+		}
+		return parsed, nil
+	}
+
+	if strings.Contains(id, "@") {
+		// Email is matched exactly as stored (the unique index is case-sensitive); no lowering.
+		return FindUserIDByEmail(ctx, id)
+	}
+	// Usernames are always lowercase by construction (see username.go).
+	return FindUserIDByUsername(ctx, strings.ToLower(id))
+}
 
 // friendshipDoc is the friendships collection document shape. userA/userB are stored in a
 // canonical order (userA is the lexicographically smaller id) so the unique index on
