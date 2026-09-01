@@ -14,7 +14,9 @@ import (
 )
 
 type sendFriendRequestRequest struct {
-	UserID string `json:"user_id"`
+	// Identifier is a User.id, an email, or a username - resolved server-side to the target
+	// user (see models.ResolveFriendTarget).
+	Identifier string `json:"identifier"`
 }
 
 type friendRequestResponse struct {
@@ -112,14 +114,15 @@ func writeFriendshipError(c *gin.Context, action string, err error) {
 
 // Send a friend request to another user.
 //
-//	 The target is a User.id supplied in the request body. The caller is resolved from their
-//	 own verified Auth0 subject, never a client-supplied value.
+//	 The target is given as an identifier - a User.id, an email, or a username - resolved
+//	 server-side. The caller is resolved from their own verified Auth0 subject, never a
+//	 client-supplied value.
 //		@Summary		Send a friend request
-//		@Description	Send a friend request to another user by their User.id
+//		@Description	Send a friend request to another user, identified by User.id, email, or username
 //		@Tags			friends
 //		@Accept			json
 //		@Produce		json
-//		@Param			request	body		sendFriendRequestRequest	true	"Target user"
+//		@Param			request	body		sendFriendRequestRequest	true	"Target user identifier"
 //		@Success		201		{object}	friendRequestResponse
 //		@Failure		400		{object}	apiv.ErrorVO
 //		@Failure		401		{object}	apiv.ErrorVO
@@ -139,14 +142,24 @@ func sendFriendRequestHandler(authzClient *authz.Client) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid request body"})
 			return
 		}
-		target, err := uuid.Parse(req.UserID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "user_id must be a valid UUID"})
+		if req.Identifier == "" {
+			c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "identifier is required"})
 			return
 		}
 
 		caller, ok := callerUserIDFromSubject(c, subject)
 		if !ok {
+			return
+		}
+
+		target, err := models.ResolveFriendTarget(c.Request.Context(), req.Identifier)
+		if err != nil {
+			if err == models.ErrTargetNotFound || err == models.ErrUserNotFound {
+				c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no user found for that id, email, or username"})
+				return
+			}
+			logging.Logger.Error("Failed to resolve friend target", "error", err.Error())
+			c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to send friend request"})
 			return
 		}
 

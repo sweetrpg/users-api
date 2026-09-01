@@ -17,17 +17,19 @@ import (
 const bioMaxLength = 500
 
 type profileResponse struct {
-	UserID  uuid.UUID `json:"user_id"`
-	Name    string    `json:"name"`
-	Email   string    `json:"email"`
-	Bio     string    `json:"bio"`
-	Website string    `json:"website"`
+	UserID   uuid.UUID `json:"user_id"`
+	Name     string    `json:"name"`
+	Email    string    `json:"email"`
+	Bio      string    `json:"bio"`
+	Website  string    `json:"website"`
+	Username string    `json:"username"`
 }
 
 type updateProfileRequest struct {
-	Name    string `json:"name"`
-	Bio     string `json:"bio"`
-	Website string `json:"website"`
+	Name     string `json:"name"`
+	Bio      string `json:"bio"`
+	Website  string `json:"website"`
+	Username string `json:"username"`
 }
 
 func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) {
@@ -70,16 +72,18 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, profileResponse{
-			UserID: profile.UserID, Name: profile.Name, Email: profile.Email, Bio: profile.Bio, Website: profile.Website,
+			UserID: profile.UserID, Name: profile.Name, Email: profile.Email,
+			Bio: profile.Bio, Website: profile.Website, Username: profile.Username,
 		})
 	}
 }
 
 // Update the caller's own profile.
 //
-//	 Updates name/bio/website only - email is read-only, sourced from Auth0 at provisioning
-//	 time (see design.md). Resolved via the caller's own verified Auth0 subject; a client
-//	 cannot target any other user's record.
+//	 Updates name/bio/website/username - email is read-only, sourced from Auth0 at provisioning
+//	 time (see design.md). An empty username in the body leaves the existing one untouched.
+//	 Resolved via the caller's own verified Auth0 subject; a client cannot target any other
+//	 user's record.
 //		@Summary		Update the caller's own profile
 //		@Description	Update the caller's own profile
 //		@Tags			profile
@@ -90,6 +94,7 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 //		@Failure		400		{object}	apiv.ErrorVO
 //		@Failure		401		{object}	apiv.ErrorVO
 //		@Failure		404		{object}	apiv.ErrorVO
+//		@Failure		409		{object}	apiv.ErrorVO
 //		@Failure		500		{object}	apiv.ErrorVO
 //		@Router			/profile [patch]
 func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
@@ -120,23 +125,35 @@ func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 			return
 		}
 
-		if err := models.UpdateProfile(c.Request.Context(), existing.UserID, req.Name, req.Bio, req.Website); err != nil {
-			if err == models.ErrProfileNotFound {
+		// An empty username in the body means "leave it as it is" - don't wipe a backfilled
+		// username just because the client didn't send one.
+		username := existing.Username
+		if req.Username != "" {
+			username = req.Username
+		}
+
+		if err := models.UpdateProfile(c.Request.Context(), existing.UserID, req.Name, req.Bio, req.Website, username); err != nil {
+			switch err {
+			case models.ErrProfileNotFound:
 				c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
-				return
+			case models.ErrUsernameTaken:
+				c.JSON(http.StatusConflict, apiv.ErrorVO{Error: "username_taken", Message: "that username is already taken"})
+			default:
+				logging.Logger.Error("Failed to update profile", "error", err.Error())
+				c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "update_failed", Message: "failed to update profile"})
 			}
-			logging.Logger.Error("Failed to update profile", "error", err.Error())
-			c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "update_failed", Message: "failed to update profile"})
 			return
 		}
 
 		c.JSON(http.StatusOK, profileResponse{
-			UserID: existing.UserID, Name: req.Name, Email: existing.Email, Bio: req.Bio, Website: req.Website,
+			UserID: existing.UserID, Name: req.Name, Email: existing.Email, Bio: req.Bio, Website: req.Website, Username: username,
 		})
 	}
 }
 
-// validateProfileUpdate returns a user-facing message if req is invalid, or "" if valid.
+// validateProfileUpdate returns a user-facing message if req is invalid, or "" if valid. An
+// empty username is allowed (means "leave unchanged"); a non-empty one must match the accepted
+// format.
 func validateProfileUpdate(req updateProfileRequest) string {
 	if len(req.Bio) > bioMaxLength {
 		return "bio must be 500 characters or fewer"
@@ -146,6 +163,9 @@ func validateProfileUpdate(req updateProfileRequest) string {
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 			return "website must be a valid http(s):// URL"
 		}
+	}
+	if req.Username != "" && !models.ValidUsername(req.Username) {
+		return "username must be 3-30 characters of lowercase letters, digits, hyphen, or underscore"
 	}
 	return ""
 }

@@ -1,3 +1,12 @@
+## [0.10.0] - 2026-09-01
+
+### 🚀 Features
+
+- *(profile)* Add username field; friend requests by id, email, or username
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.9.0
 ## [0.9.0] - 2026-09-01
 
 ### 🚀 Features

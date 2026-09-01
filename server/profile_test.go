@@ -106,3 +106,19 @@ func TestUpdateProfile_RejectsRequestWithoutSchemeHost(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateProfile_UsernameValidation(t *testing.T) {
+	// Empty is allowed (means "leave unchanged"); valid shapes pass; bad shapes are rejected.
+	valid := []string{"", "ada", "ada-lovelace", "user_1"}
+	for _, u := range valid {
+		if got := validateProfileUpdate(updateProfileRequest{Username: u}); got != "" {
+			t.Errorf("validateProfileUpdate(username=%q) = %q, want empty", u, got)
+		}
+	}
+	invalid := []string{"ab", "Ada", "has space", "no.dot", "way-too-long-username-way-too-long-x"}
+	for _, u := range invalid {
+		if got := validateProfileUpdate(updateProfileRequest{Username: u}); got == "" {
+			t.Errorf("validateProfileUpdate(username=%q) = empty, want a validation error", u)
+		}
+	}
+}
