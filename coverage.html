@@ -940,10 +940,10 @@ type FriendRequest struct {
 // orderPair returns x and y sorted so the first return value is the lexicographically smaller
 // of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
 func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="13">{
-        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov7" title="6">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov8" title="9">{
                 return x, y
         }</span>
-        <span class="cov7" title="7">return y, x</span>
+        <span class="cov5" title="4">return y, x</span>
 }
 
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
