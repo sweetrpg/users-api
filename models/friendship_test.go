@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -215,6 +216,41 @@ func TestRemove_RejectsNonPartyAndPending(t *testing.T) {
 	}
 	if err := RemoveFriendship(ctx, c, fr.ID); !errors.Is(err, ErrNotAParty) {
 		t.Errorf("third-party remove err = %v, want ErrNotAParty", err)
+	}
+}
+
+func TestResolveFriendTarget_ByIDEmailUsername(t *testing.T) {
+	ctx := context.Background()
+	username := "resolve-" + strings.ToLower(uuid.NewString()[:8])
+	email := username + "@example.com"
+	id := seedUser(t, "Resolve Target", email, username)
+
+	cases := map[string]string{
+		"by id":                      id.String(),
+		"by email":                   email,
+		"by username":                username,
+		"username cased differently": strings.ToUpper(username),
+	}
+	for name, identifier := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := ResolveFriendTarget(ctx, identifier)
+			if err != nil {
+				t.Fatalf("ResolveFriendTarget(%q): %v", identifier, err)
+			}
+			if got != id {
+				t.Errorf("ResolveFriendTarget(%q) = %v, want %v", identifier, got, id)
+			}
+		})
+	}
+}
+
+func TestResolveFriendTarget_Misses(t *testing.T) {
+	ctx := context.Background()
+	misses := []string{"", "   ", uuid.NewString(), "nobody@example.com", "no-such-username"}
+	for _, m := range misses {
+		if _, err := ResolveFriendTarget(ctx, m); !errors.Is(err, ErrTargetNotFound) && !errors.Is(err, ErrUserNotFound) {
+			t.Errorf("ResolveFriendTarget(%q) err = %v, want a not-found error", m, err)
+		}
 	}
 }
 

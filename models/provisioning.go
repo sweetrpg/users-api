@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/sweetrpg/common.go/logging"
 	"github.com/sweetrpg/mongodb.go/database"
 	"github.com/sweetrpg/users-api/constants"
 	"go.mongodb.org/mongo-driver/bson"
@@ -44,9 +45,17 @@ func EnsureLoginProfileIndexes(ctx context.Context) error {
 // every startup - CreateOne is idempotent for an identical index definition.
 func EnsureUserIndexes(ctx context.Context) error {
 	collection := database.Db.Collection(constants.UsersCollection)
-	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	if _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys:    bson.D{{Key: "email", Value: 1}},
 		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		return err
+	}
+	// Sparse so the many pre-existing user docs without a username (backfilled lazily, see
+	// username.go) don't all collide on a null key.
+	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "username", Value: 1}},
+		Options: options.Index().SetUnique(true).SetSparse(true),
 	})
 	return err
 }
@@ -59,11 +68,20 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 	if profile, err := findLoginProfileBySubject(ctx, subject); err != nil {
 		return ProvisionResult{}, err
 	} else if profile != nil {
+		// Backfill a username for an existing user that predates the username field. Best
+		// effort - a failure here shouldn't block the login.
+		if err := EnsureUsername(ctx, profile.UserID, usernameSeed(email, name)); err != nil {
+			logging.Logger.Warn("username backfill failed", "userId", profile.UserID.String(), "error", err.Error())
+		}
 		return ProvisionResult{UserID: profile.UserID, Created: false}, nil
 	}
 
 	userID := uuid.New()
-	user := userDoc{ID: userID, Name: name, Email: email}
+	username, err := GenerateUsername(ctx, usernameSeed(email, name))
+	if err != nil {
+		return ProvisionResult{}, err
+	}
+	user := userDoc{ID: userID, Name: name, Email: email, Username: username}
 	if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil {
 		if !mongo.IsDuplicateKeyError(err) {
 			return ProvisionResult{}, err
@@ -83,6 +101,9 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 			return ProvisionResult{}, err
 		}
 		userID = existingUser.ID
+		if ensureErr := EnsureUsername(ctx, userID, usernameSeed(email, name)); ensureErr != nil {
+			logging.Logger.Warn("username backfill failed for adopted user", "userId", userID.String(), "error", ensureErr.Error())
+		}
 	}
 
 	profile := loginProfileDoc{
@@ -91,7 +112,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 		ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
 		ThirdPartyAuthID: subject,
 	}
-	_, err := database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
+	_, err = database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
 	if err == nil {
 		return ProvisionResult{UserID: userID, Created: true}, nil
 	}

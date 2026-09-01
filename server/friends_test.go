@@ -66,18 +66,18 @@ func TestFriends_RejectInvalidToken(t *testing.T) {
 	}
 }
 
-// TestSendFriendRequest_RejectsMalformedTargetBeforeDB proves the send handler validates the
-// request body shape after the authz check but before resolving the caller against MongoDB, so
-// this assertion needs no reachable database. Any authenticated identity reaches validation -
-// no role requirement, matching the profile self-service pattern.
-func TestSendFriendRequest_RejectsMalformedTarget(t *testing.T) {
+// TestSendFriendRequest_RejectsEmptyIdentifier proves the send handler validates the request
+// body shape after the authz check but before any MongoDB access, so this assertion needs no
+// reachable database. A non-empty identifier would go on to a DB lookup, so it isn't covered
+// here - see models/friendship_test.go's ResolveFriendTarget cases.
+func TestSendFriendRequest_RejectsEmptyIdentifier(t *testing.T) {
 	srv := newAuthzStub(t, authz.CheckResponse{Allowed: true, Roles: []string{authz.RoleUser}, Sub: "auth0|user-sub"}, http.StatusOK)
 	r := newFriendsTestRouter(t, srv.URL)
 
 	cases := map[string]string{
-		"not a uuid":     `{"user_id":"nope"}`,
-		"empty user_id":  `{"user_id":""}`,
-		"malformed json": `{`,
+		"empty identifier":   `{"identifier":""}`,
+		"missing identifier": `{}`,
+		"malformed json":     `{`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

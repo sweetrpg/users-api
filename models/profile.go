@@ -19,13 +19,18 @@ import (
 // recent login (see add-users-api-provisioning's design.md).
 var ErrProfileNotFound = errors.New("models: profile not found")
 
+// ErrUsernameTaken means a profile update tried to set a username another user already holds
+// (the sparse unique index on users.username rejected the write).
+var ErrUsernameTaken = errors.New("models: username already taken")
+
 // Profile is the self-service view of a User's own record.
 type Profile struct {
-	UserID  uuid.UUID
-	Name    string
-	Email   string
-	Bio     string
-	Website string
+	UserID   uuid.UUID
+	Name     string
+	Email    string
+	Bio      string
+	Website  string
+	Username string
 }
 
 // userIDFilter matches _id against this service's own binary uuid.UUID encoding and both cases
@@ -82,26 +87,38 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
 	email, _ := raw.Lookup("email").StringValueOK()
 	bio, _ := raw.Lookup("bio").StringValueOK()
 	website, _ := raw.Lookup("website").StringValueOK()
+	username, _ := raw.Lookup("username").StringValueOK()
 
-	return &Profile{UserID: id, Name: name, Email: email, Bio: bio, Website: website}, nil
+	return &Profile{UserID: id, Name: name, Email: email, Bio: bio, Website: website, Username: username}, nil
 }
 
-// UpdateProfile updates name/bio/website for userID - email is never writable through this
-// path (see design.md's "email is read-only" decision). Returns ErrProfileNotFound if userID
-// doesn't match an existing, non-soft-deleted User.
-func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website string) error {
+// UpdateProfile updates name/bio/website/username for userID - email is never writable through
+// this path (see design.md's "email is read-only" decision). Returns ErrProfileNotFound if
+// userID doesn't match an existing, non-soft-deleted User, or ErrUsernameTaken if username
+// collides with another user (the sparse unique index rejects the write).
+func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website, username string) error {
 	filter := bson.D{{Key: "$and", Value: bson.A{
 		notSoftDeletedFilter,
 		userIDFilter(userID),
 	}}}
-	update := bson.D{{Key: "$set", Value: bson.D{
+	set := bson.D{
 		{Key: "name", Value: name},
 		{Key: "bio", Value: bio},
 		{Key: "website", Value: website},
-	}}}
+	}
+	// Only touch username when a value is given. Writing "" would land an empty string on the
+	// sparse unique index (which excludes only *missing* keys, not empty ones), so two cleared
+	// usernames would collide.
+	if username != "" {
+		set = append(set, bson.E{Key: "username", Value: username})
+	}
+	update := bson.D{{Key: "$set", Value: set}}
 
 	result, err := database.Db.Collection(constants.UsersCollection).UpdateOne(ctx, filter, update)
 	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return ErrUsernameTaken
+		}
 		return err
 	}
 	if result.MatchedCount == 0 {
