@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	modelcore "github.com/sweetrpg/model-core.go/models"
 	"github.com/sweetrpg/mongodb.go/database"
 	"github.com/sweetrpg/users-api/constants"
 	"go.mongodb.org/mongo-driver/bson"
@@ -68,15 +69,19 @@ func ResolveFriendTarget(ctx context.Context, identifier string) (uuid.UUID, err
 // friendshipDoc is the friendships collection document shape. userA/userB are stored in a
 // canonical order (userA is the lexicographically smaller id) so the unique index on
 // (userA, userB) rejects a duplicate request sent in either direction - see
-// add-users-api-friends design.md.
+// add-users-api-friends design.md. The embedded modelcore.Auditable supplies created_at/by and
+// updated_at/by (replacing the old camelCase createdAt/updatedAt; the audit-fields backfill
+// copies pre-existing values across). A friendship is deleted hard, not soft: the row's
+// existence is the relationship, and decline/remove must free the (userA, userB) pair for a
+// fresh request - PADR-0027's relationship-edge carve-out. So deleted_at/by stay nil in practice.
 type friendshipDoc struct {
 	ID          uuid.UUID `bson:"_id"`
 	UserA       uuid.UUID `bson:"userA"`
 	UserB       uuid.UUID `bson:"userB"`
 	Status      string    `bson:"status"`
 	RequestedBy uuid.UUID `bson:"requestedBy"`
-	CreatedAt   time.Time `bson:"createdAt"`
-	UpdatedAt   time.Time `bson:"updatedAt"`
+
+	modelcore.Auditable `bson:",inline"`
 }
 
 // Friend is one entry in a caller's accepted-friend list: the other party's id, plus their
@@ -140,9 +145,8 @@ func SendFriendRequest(ctx context.Context, caller, target uuid.UUID) (*friendsh
 		UserB:       userB,
 		Status:      constants.FriendshipStatusPending,
 		RequestedBy: caller,
-		CreatedAt:   now,
-		UpdatedAt:   now,
 	}
+	modelcore.StampCreate(&doc.Auditable, caller.String(), now)
 
 	_, err := database.Db.Collection(constants.FriendshipsCollection).InsertOne(ctx, doc)
 	if err != nil {
@@ -170,7 +174,8 @@ func AcceptFriendRequest(ctx context.Context, caller, id uuid.UUID) error {
 	}
 	update := bson.D{{Key: "$set", Value: bson.D{
 		{Key: "status", Value: constants.FriendshipStatusAccepted},
-		{Key: "updatedAt", Value: time.Now().UTC()},
+		{Key: "updated_at", Value: time.Now().UTC()},
+		{Key: "updated_by", Value: caller.String()},
 	}}}
 
 	result, err := database.Db.Collection(constants.FriendshipsCollection).UpdateOne(ctx, filter, update)
@@ -349,7 +354,7 @@ func lookupUserSummaries(ctx context.Context, ids []uuid.UUID) map[uuid.UUID]use
 		values = append(values, id)
 	}
 	filter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: values}}}},
 	}}}
 

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/sweetrpg/common.go/logging"
+	modelcore "github.com/sweetrpg/model-core.go/models"
 	"github.com/sweetrpg/mongodb.go/database"
 	"github.com/sweetrpg/users-api/constants"
 	"go.mongodb.org/mongo-driver/bson"
@@ -81,7 +83,9 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 	if err != nil {
 		return ProvisionResult{}, err
 	}
+	// A user provisioning their own account on first login is the acting user for that write.
 	user := userDoc{ID: userID, Name: name, Email: email, Username: username}
+	modelcore.StampCreate(&user.Auditable, userID.String(), time.Now().UTC())
 	if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil {
 		if !mongo.IsDuplicateKeyError(err) {
 			return ProvisionResult{}, err
@@ -112,6 +116,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 		ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
 		ThirdPartyAuthID: subject,
 	}
+	modelcore.StampCreate(&profile.Auditable, userID.String(), time.Now().UTC())
 	_, err = database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
 	if err == nil {
 		return ProvisionResult{UserID: userID, Created: true}, nil
@@ -143,7 +148,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 // of adopting the record.
 func findUserByEmail(ctx context.Context, email string) (*userDoc, error) {
 	filter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		bson.D{{Key: "email", Value: email}},
 	}}}
 
@@ -181,7 +186,7 @@ func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) {
 
 func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) {
 	filter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
 		bson.D{{Key: "thirdPartyAuthId", Value: subject}},
 	}}}

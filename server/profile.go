@@ -132,7 +132,7 @@ func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 			username = req.Username
 		}
 
-		if err := models.UpdateProfile(c.Request.Context(), existing.UserID, req.Name, req.Bio, req.Website, username); err != nil {
+		if err := models.UpdateProfile(c.Request.Context(), existing.UserID, existing.UserID.String(), req.Name, req.Bio, req.Website, username); err != nil {
 			switch err {
 			case models.ErrProfileNotFound:
 				c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})

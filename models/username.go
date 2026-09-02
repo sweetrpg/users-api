@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	modelcore "github.com/sweetrpg/model-core.go/models"
 	"github.com/sweetrpg/mongodb.go/database"
 	"github.com/sweetrpg/users-api/constants"
 	"go.mongodb.org/mongo-driver/bson"
@@ -69,7 +71,7 @@ func slugifyUsername(seed string) string {
 // usernameTaken reports whether any live user already holds username.
 func usernameTaken(ctx context.Context, username string) (bool, error) {
 	filter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		bson.D{{Key: "username", Value: username}},
 	}}}
 	n, err := database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
@@ -107,7 +109,7 @@ func GenerateUsername(ctx context.Context, seed string) (string, error) {
 // on the write) is treated as success - the other writer set it.
 func EnsureUsername(ctx context.Context, userID uuid.UUID, seed string) error {
 	filter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		userIDFilter(userID),
 	}}}
 
@@ -129,14 +131,19 @@ func EnsureUsername(ctx context.Context, userID uuid.UUID, seed string) error {
 	}
 
 	setFilter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		userIDFilter(userID),
 		bson.D{{Key: "$or", Value: bson.A{
 			bson.D{{Key: "username", Value: bson.D{{Key: "$exists", Value: false}}}},
 			bson.D{{Key: "username", Value: ""}},
 		}}},
 	}}}
-	update := bson.D{{Key: "$set", Value: bson.D{{Key: "username", Value: username}}}}
+	// Lazy backfill is a system write - stamp updated_at/updated_by with the system sentinel.
+	update := bson.D{{Key: "$set", Value: bson.D{
+		{Key: "username", Value: username},
+		{Key: "updated_at", Value: time.Now().UTC()},
+		{Key: "updated_by", Value: modelcore.SystemActor},
+	}}}
 	if _, err := database.Db.Collection(constants.UsersCollection).UpdateOne(ctx, setFilter, update); err != nil {
 		if mongo.IsDuplicateKeyError(err) {
 			return nil
@@ -149,7 +156,7 @@ func EnsureUsername(ctx context.Context, userID uuid.UUID, seed string) error {
 // FindUserIDByUsername resolves a username to its live user's id, or ErrUserNotFound.
 func FindUserIDByUsername(ctx context.Context, username string) (uuid.UUID, error) {
 	filter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		bson.D{{Key: "username", Value: username}},
 	}}}
 
@@ -185,7 +192,7 @@ func FindUserIDByEmail(ctx context.Context, email string) (uuid.UUID, error) {
 // well-formed UUID that isn't anyone.
 func userExists(ctx context.Context, id uuid.UUID) (bool, error) {
 	filter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		userIDFilter(id),
 	}}}
 	n, err := database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
