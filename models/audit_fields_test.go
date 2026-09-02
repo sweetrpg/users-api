@@ -86,11 +86,14 @@ func TestAcceptFriendRequest_AdvancesUpdateAuditToAccepter(t *testing.T) {
 		FindOne(ctx, bson.D{{Key: "_id", Value: fr.ID}}).Decode(&got); err != nil {
 		t.Fatalf("reload friendship: %v", err)
 	}
+	// updated_by flipping to the accepter is the signal that the update stamp ran. updated_at
+	// only needs to be re-set to a current time - send and accept can land in the same
+	// millisecond, and BSON datetime is millisecond-precision, so "strictly after" is flaky.
 	if got.UpdatedBy != b.String() {
 		t.Errorf("updated_by = %q after accept, want the accepter %q", got.UpdatedBy, b.String())
 	}
-	if !got.UpdatedAt.After(got.CreatedAt) {
-		t.Errorf("updated_at %v not after created_at %v", got.UpdatedAt, got.CreatedAt)
+	if got.UpdatedAt.Before(got.CreatedAt) {
+		t.Errorf("updated_at %v is before created_at %v", got.UpdatedAt, got.CreatedAt)
 	}
 	if got.CreatedBy != a.String() {
 		t.Errorf("created_by = %q after accept, want the original requester %q (unchanged)", got.CreatedBy, a.String())
