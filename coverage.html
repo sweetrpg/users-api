@@ -57,33 +57,35 @@
 				
 				<option value="file0">github.com/sweetrpg/users-api/authz/client.go (67.9%)</option>
 				
-				<option value="file1">github.com/sweetrpg/users-api/cmd/users-api/main.go (0.0%)</option>
+				<option value="file1">github.com/sweetrpg/users-api/cmd/backfill-audit-fields/main.go (5.6%)</option>
 				
-				<option value="file2">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
+				<option value="file2">github.com/sweetrpg/users-api/cmd/users-api/main.go (0.0%)</option>
 				
-				<option value="file3">github.com/sweetrpg/users-api/models/friendship.go (86.6%)</option>
+				<option value="file3">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
 				
-				<option value="file4">github.com/sweetrpg/users-api/models/profile.go (73.8%)</option>
+				<option value="file4">github.com/sweetrpg/users-api/models/friendship.go (86.7%)</option>
 				
-				<option value="file5">github.com/sweetrpg/users-api/models/provisioning.go (79.7%)</option>
+				<option value="file5">github.com/sweetrpg/users-api/models/profile.go (73.8%)</option>
 				
-				<option value="file6">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
+				<option value="file6">github.com/sweetrpg/users-api/models/provisioning.go (80.3%)</option>
 				
-				<option value="file7">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
+				<option value="file7">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
-				<option value="file8">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
+				<option value="file8">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
 				
-				<option value="file9">github.com/sweetrpg/users-api/server/authz_resolve.go (81.2%)</option>
+				<option value="file9">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
 				
-				<option value="file10">github.com/sweetrpg/users-api/server/friends.go (32.7%)</option>
+				<option value="file10">github.com/sweetrpg/users-api/server/authz_resolve.go (81.2%)</option>
 				
-				<option value="file11">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				<option value="file11">github.com/sweetrpg/users-api/server/friends.go (32.7%)</option>
 				
-				<option value="file12">github.com/sweetrpg/users-api/server/profile.go (44.6%)</option>
+				<option value="file12">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
 				
-				<option value="file13">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				<option value="file13">github.com/sweetrpg/users-api/server/profile.go (44.6%)</option>
 				
-				<option value="file14">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
+				<option value="file14">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				
+				<option value="file15">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
 				
 				</select>
 			</div>
@@ -214,7 +216,270 @@ func (c *Client) Check(ctx context.Context, token, service string) (*CheckRespon
 }
 </pre>
 		
-		<pre class="file" id="file1" style="display: none">package main
+		<pre class="file" id="file1" style="display: none">// Command backfill-audit-fields populates the platform audit fields (PADR-0001) on users-api's
+// pre-convention documents: users, login_profiles, and friendships. Run once against the target
+// database in a maintenance window; it is idempotent, so a re-run is a no-op.
+//
+// Usage:
+//
+//        go run ./cmd/backfill-audit-fields               # dry run - reports counts, writes nothing
+//        go run ./cmd/backfill-audit-fields -apply        # perform the writes
+//        go run ./cmd/backfill-audit-fields -apply -migrated-at 2026-08-01T00:00:00Z
+//
+// DB_URI (or the DB_* parts) is read from the environment / .env, same as the service.
+package main
+
+import (
+        "context"
+        "flag"
+        "time"
+
+        "github.com/google/uuid"
+        "github.com/joho/godotenv"
+        "github.com/sweetrpg/common.go/logging"
+        modelcore "github.com/sweetrpg/model-core.go/models"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+)
+
+func main() <span class="cov0" title="0">{
+        apply := flag.Bool("apply", false, "perform writes (default: dry run)")
+        migratedAtRaw := flag.String("migrated-at", "", "RFC3339 timestamp for created_at when no better signal exists (default: now)")
+        flag.Parse()
+
+        _ = godotenv.Load(".env")
+        logging.Init()
+
+        migratedAt := time.Now().UTC()
+        if *migratedAtRaw != "" </span><span class="cov0" title="0">{
+                parsed, err := time.Parse(time.RFC3339, *migratedAtRaw)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("invalid -migrated-at", "value", *migratedAtRaw, "error", err.Error())
+                        return
+                }</span>
+                <span class="cov0" title="0">migratedAt = parsed.UTC()</span>
+        }
+
+        <span class="cov0" title="0">database.SetupDatabase()
+        defer database.TeardownDatabase()
+
+        ctx := context.Background()
+        mode := "DRY RUN"
+        if *apply </span><span class="cov0" title="0">{
+                mode = "APPLY"
+        }</span>
+        <span class="cov0" title="0">logging.Logger.Info("backfill-audit-fields starting", "mode", mode, "migratedAt", migratedAt.Format(time.RFC3339))
+
+        users := backfillUsers(ctx, *apply, migratedAt)
+        profiles := backfillSimple(ctx, constants.LoginProfilesCollection, *apply, migratedAt)
+        friendships := backfillFriendships(ctx, *apply)
+
+        logging.Logger.Info("backfill-audit-fields done",
+                "users", users, "login_profiles", profiles, "friendships", friendships, "mode", mode)</span>
+}
+
+// needsCreatedAt matches a document with no usable created_at: the key is missing, null, or the
+// Go/BSON zero time. This is the idempotency guard - a document already stamped is skipped.
+var needsCreatedAt = bson.D{{Key: "$or", Value: bson.A{
+        bson.D{{Key: "created_at", Value: bson.D{{Key: "$exists", Value: false}}}},
+        bson.D{{Key: "created_at", Value: nil}},
+        bson.D{{Key: "created_at", Value: time.Time{}}},
+}}}
+
+// setAudit is the $set for a system-owned backfill stamp.
+func setAudit(createdAt time.Time) bson.D <span class="cov0" title="0">{
+        return bson.D{
+                {Key: "created_at", Value: createdAt},
+                {Key: "created_by", Value: modelcore.SystemActor},
+                {Key: "updated_at", Value: createdAt},
+                {Key: "updated_by", Value: modelcore.SystemActor},
+        }
+}</span>
+
+// carryDeletedAt copies a legacy camelCase deletedAt onto deleted_at when the new key is absent.
+// The old key is left in place (harmless, and one less thing to undo on a rollback).
+func carryDeletedAt(ctx context.Context, coll string, apply bool) int <span class="cov0" title="0">{
+        filter := bson.D{
+                {Key: "deletedAt", Value: bson.D{{Key: "$ne", Value: nil}}},
+                {Key: "deleted_at", Value: bson.D{{Key: "$exists", Value: false}}},
+        }
+        docs, err := findRaw(ctx, coll, filter)
+        if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("carryDeletedAt query failed", "collection", coll, "error", err.Error())
+                return 0
+        }</span>
+        <span class="cov0" title="0">n := 0
+        for _, d := range docs </span><span class="cov0" title="0">{
+                id := d.Lookup("_id")
+                legacy := d.Lookup("deletedAt")
+                if !apply </span><span class="cov0" title="0">{
+                        n++
+                        continue</span>
+                }
+                <span class="cov0" title="0">_, err := database.Db.Collection(coll).UpdateOne(ctx,
+                        bson.D{{Key: "_id", Value: id}},
+                        bson.D{{Key: "$set", Value: bson.D{{Key: "deleted_at", Value: legacy}, {Key: "deleted_by", Value: modelcore.SystemActor}}}})
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("carryDeletedAt update failed", "collection", coll, "error", err.Error())
+                        continue</span>
+                }
+                <span class="cov0" title="0">n++</span>
+        }
+        <span class="cov0" title="0">return n</span>
+}
+
+// backfillSimple stamps every un-stamped document in coll with migratedAt / SystemActor.
+func backfillSimple(ctx context.Context, coll string, apply bool, migratedAt time.Time) int <span class="cov0" title="0">{
+        carryDeletedAt(ctx, coll, apply)
+        docs, err := findRaw(ctx, coll, needsCreatedAt)
+        if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("backfillSimple query failed", "collection", coll, "error", err.Error())
+                return 0
+        }</span>
+        <span class="cov0" title="0">n := 0
+        for _, d := range docs </span><span class="cov0" title="0">{
+                if !apply </span><span class="cov0" title="0">{
+                        n++
+                        continue</span>
+                }
+                <span class="cov0" title="0">if _, err := database.Db.Collection(coll).UpdateOne(ctx,
+                        bson.D{{Key: "_id", Value: d.Lookup("_id")}},
+                        bson.D{{Key: "$set", Value: setAudit(migratedAt)}}); err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("backfillSimple update failed", "collection", coll, "error", err.Error())
+                        continue</span>
+                }
+                <span class="cov0" title="0">n++</span>
+        }
+        <span class="cov0" title="0">return n</span>
+}
+
+// backfillUsers stamps un-stamped users. created_at is the earliest friendship created_at the
+// user is a party to (accounts predate their friendships), falling back to migratedAt.
+func backfillUsers(ctx context.Context, apply bool, migratedAt time.Time) int <span class="cov0" title="0">{
+        carryDeletedAt(ctx, constants.UsersCollection, apply)
+        docs, err := findRaw(ctx, constants.UsersCollection, needsCreatedAt)
+        if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("backfillUsers query failed", "error", err.Error())
+                return 0
+        }</span>
+        <span class="cov0" title="0">n := 0
+        for _, d := range docs </span><span class="cov0" title="0">{
+                id := d.Lookup("_id")
+                createdAt := earliestFriendshipTime(ctx, id, migratedAt)
+                if !apply </span><span class="cov0" title="0">{
+                        n++
+                        continue</span>
+                }
+                <span class="cov0" title="0">if _, err := database.Db.Collection(constants.UsersCollection).UpdateOne(ctx,
+                        bson.D{{Key: "_id", Value: id}},
+                        bson.D{{Key: "$set", Value: setAudit(createdAt)}}); err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("backfillUsers update failed", "error", err.Error())
+                        continue</span>
+                }
+                <span class="cov0" title="0">n++</span>
+        }
+        <span class="cov0" title="0">return n</span>
+}
+
+// earliestFriendshipTime returns the oldest created_at/createdAt among friendships the id is a
+// party to, or fallback if there are none.
+func earliestFriendshipTime(ctx context.Context, userID bson.RawValue, fallback time.Time) time.Time <span class="cov0" title="0">{
+        filter := bson.D{{Key: "$or", Value: bson.A{
+                bson.D{{Key: "userA", Value: userID}},
+                bson.D{{Key: "userB", Value: userID}},
+        }}}
+        docs, err := findRaw(ctx, constants.FriendshipsCollection, filter)
+        if err != nil || len(docs) == 0 </span><span class="cov0" title="0">{
+                return fallback
+        }</span>
+        <span class="cov0" title="0">earliest := fallback
+        found := false
+        for _, d := range docs </span><span class="cov0" title="0">{
+                for _, key := range []string{"created_at", "createdAt"} </span><span class="cov0" title="0">{
+                        if t, ok := d.Lookup(key).TimeOK(); ok </span><span class="cov0" title="0">{
+                                if !found || t.Before(earliest) </span><span class="cov0" title="0">{
+                                        earliest, found = t, true
+                                }</span>
+                        }
+                }
+        }
+        <span class="cov0" title="0">if !found </span><span class="cov0" title="0">{
+                return fallback
+        }</span>
+        <span class="cov0" title="0">return earliest.UTC()</span>
+}
+
+// backfillFriendships copies the legacy camelCase createdAt/updatedAt onto created_at/updated_at
+// and sets created_by/updated_by to the pair's requester.
+func backfillFriendships(ctx context.Context, apply bool) int <span class="cov0" title="0">{
+        docs, err := findRaw(ctx, constants.FriendshipsCollection, needsCreatedAt)
+        if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("backfillFriendships query failed", "error", err.Error())
+                return 0
+        }</span>
+        <span class="cov0" title="0">n := 0
+        for _, d := range docs </span><span class="cov0" title="0">{
+                createdAt, ok := d.Lookup("createdAt").TimeOK()
+                if !ok </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+                <span class="cov0" title="0">updatedAt, ok := d.Lookup("updatedAt").TimeOK()
+                if !ok </span><span class="cov0" title="0">{
+                        updatedAt = createdAt
+                }</span>
+                <span class="cov0" title="0">by := rawValueToUserID(d.Lookup("requestedBy"))
+                if !apply </span><span class="cov0" title="0">{
+                        n++
+                        continue</span>
+                }
+                <span class="cov0" title="0">if _, err := database.Db.Collection(constants.FriendshipsCollection).UpdateOne(ctx,
+                        bson.D{{Key: "_id", Value: d.Lookup("_id")}},
+                        bson.D{{Key: "$set", Value: bson.D{
+                                {Key: "created_at", Value: createdAt},
+                                {Key: "created_by", Value: by},
+                                {Key: "updated_at", Value: updatedAt},
+                                {Key: "updated_by", Value: by},
+                        }}}); err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("backfillFriendships update failed", "error", err.Error())
+                        continue</span>
+                }
+                <span class="cov0" title="0">n++</span>
+        }
+        <span class="cov0" title="0">return n</span>
+}
+
+// rawValueToUserID renders a BSON value that holds a user id - binary uuid.UUID (this service's
+// encoding) or a legacy plain string - as the canonical lowercase uuid string, matching what the
+// live write paths stamp into created_by/updated_by. Returns "" if it can't be decoded.
+func rawValueToUserID(v bson.RawValue) string <span class="cov10" title="4">{
+        if s, ok := v.StringValueOK(); ok </span><span class="cov5" title="2">{
+                if id, err := uuid.Parse(s); err == nil </span><span class="cov5" title="2">{
+                        return id.String()
+                }</span>
+                <span class="cov0" title="0">return s</span>
+        }
+        <span class="cov5" title="2">var id uuid.UUID
+        if err := v.Unmarshal(&amp;id); err == nil </span><span class="cov1" title="1">{
+                return id.String()
+        }</span>
+        <span class="cov1" title="1">return ""</span>
+}
+
+func findRaw(ctx context.Context, coll string, filter bson.D) ([]bson.Raw, error) <span class="cov0" title="0">{
+        cur, err := database.Db.Collection(coll).Find(ctx, filter)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov0" title="0">var out []bson.Raw
+        if err := cur.All(ctx, &amp;out); err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov0" title="0">return out, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package main
 
 import (
         "context"
@@ -477,7 +742,7 @@ func RateLimiter() gin.HandlerFunc <span class="cov0" title="0">{
 }
 </pre>
 		
-		<pre class="file" id="file2" style="display: none">// Package docs Code generated by swaggo/swag. DO NOT EDIT
+		<pre class="file" id="file3" style="display: none">// Package docs Code generated by swaggo/swag. DO NOT EDIT
 package docs
 
 import "github.com/swaggo/swag"
@@ -869,7 +1134,7 @@ func init() <span class="cov0" title="0">{
 }</span>
 </pre>
 		
-		<pre class="file" id="file3" style="display: none">package models
+		<pre class="file" id="file4" style="display: none">package models
 
 import (
         "bytes"
@@ -879,6 +1144,7 @@ import (
         "time"
 
         "github.com/google/uuid"
+        modelcore "github.com/sweetrpg/model-core.go/models"
         "github.com/sweetrpg/mongodb.go/database"
         "github.com/sweetrpg/users-api/constants"
         "go.mongodb.org/mongo-driver/bson"
@@ -939,15 +1205,19 @@ func ResolveFriendTarget(ctx context.Context, identifier string) (uuid.UUID, err
 // friendshipDoc is the friendships collection document shape. userA/userB are stored in a
 // canonical order (userA is the lexicographically smaller id) so the unique index on
 // (userA, userB) rejects a duplicate request sent in either direction - see
-// add-users-api-friends design.md.
+// add-users-api-friends design.md. The embedded modelcore.Auditable supplies created_at/by and
+// updated_at/by (replacing the old camelCase createdAt/updatedAt; the audit-fields backfill
+// copies pre-existing values across). A friendship is deleted hard, not soft: the row's
+// existence is the relationship, and decline/remove must free the (userA, userB) pair for a
+// fresh request - PADR-0027's relationship-edge carve-out. So deleted_at/by stay nil in practice.
 type friendshipDoc struct {
         ID          uuid.UUID `bson:"_id"`
         UserA       uuid.UUID `bson:"userA"`
         UserB       uuid.UUID `bson:"userB"`
         Status      string    `bson:"status"`
         RequestedBy uuid.UUID `bson:"requestedBy"`
-        CreatedAt   time.Time `bson:"createdAt"`
-        UpdatedAt   time.Time `bson:"updatedAt"`
+
+        modelcore.Auditable `bson:",inline"`
 }
 
 // Friend is one entry in a caller's accepted-friend list: the other party's id, plus their
@@ -972,11 +1242,11 @@ type FriendRequest struct {
 
 // orderPair returns x and y sorted so the first return value is the lexicographically smaller
 // of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
-func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="13">{
-        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov6" title="5">{
+func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="15">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov8" title="10">{
                 return x, y
         }</span>
-        <span class="cov8" title="8">return y, x</span>
+        <span class="cov6" title="5">return y, x</span>
 }
 
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
@@ -998,12 +1268,12 @@ func EnsureFriendshipIndexes(ctx context.Context) error <span class="cov1" title
 // SendFriendRequest creates a pending friendship from caller to target. Rejects a self-request
 // and, via the unique index, a duplicate for a pair that already has a pending request or an
 // accepted friendship in either direction.
-func SendFriendRequest(ctx context.Context, caller, target uuid.UUID) (*friendshipDoc, error) <span class="cov9" title="12">{
+func SendFriendRequest(ctx context.Context, caller, target uuid.UUID) (*friendshipDoc, error) <span class="cov9" title="14">{
         if caller == target </span><span class="cov1" title="1">{
                 return nil, ErrSelfRequest
         }</span>
 
-        <span class="cov9" title="11">userA, userB := orderPair(caller, target)
+        <span class="cov9" title="13">userA, userB := orderPair(caller, target)
         now := time.Now().UTC()
         doc := friendshipDoc{
                 ID:          uuid.New(),
@@ -1011,9 +1281,8 @@ func SendFriendRequest(ctx context.Context, caller, target uuid.UUID) (*friendsh
                 UserB:       userB,
                 Status:      constants.FriendshipStatusPending,
                 RequestedBy: caller,
-                CreatedAt:   now,
-                UpdatedAt:   now,
         }
+        modelcore.StampCreate(&amp;doc.Auditable, caller.String(), now)
 
         _, err := database.Db.Collection(constants.FriendshipsCollection).InsertOne(ctx, doc)
         if err != nil </span><span class="cov3" title="2">{
@@ -1022,14 +1291,14 @@ func SendFriendRequest(ctx context.Context, caller, target uuid.UUID) (*friendsh
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
         }
-        <span class="cov8" title="9">return &amp;doc, nil</span>
+        <span class="cov8" title="11">return &amp;doc, nil</span>
 }
 
 // AcceptFriendRequest marks a pending request accepted. The caller must be a party to the
 // document and must not be the original requester. The state check is a single atomic
 // UpdateOne; a follow-up owner-agnostic read only runs to classify a miss (404 vs 403 vs 409)
 // and never re-opens a window to bypass the check.
-func AcceptFriendRequest(ctx context.Context, caller, id uuid.UUID) error <span class="cov7" title="6">{
+func AcceptFriendRequest(ctx context.Context, caller, id uuid.UUID) error <span class="cov7" title="7">{
         filter := bson.D{
                 {Key: "_id", Value: id},
                 {Key: "status", Value: constants.FriendshipStatusPending},
@@ -1041,17 +1310,18 @@ func AcceptFriendRequest(ctx context.Context, caller, id uuid.UUID) error <span 
         }
         update := bson.D{{Key: "$set", Value: bson.D{
                 {Key: "status", Value: constants.FriendshipStatusAccepted},
-                {Key: "updatedAt", Value: time.Now().UTC()},
+                {Key: "updated_at", Value: time.Now().UTC()},
+                {Key: "updated_by", Value: caller.String()},
         }}}
 
         result, err := database.Db.Collection(constants.FriendshipsCollection).UpdateOne(ctx, filter, update)
         if err != nil </span><span class="cov0" title="0">{
                 return err
         }</span>
-        <span class="cov7" title="6">if result.MatchedCount == 0 </span><span class="cov4" title="3">{
+        <span class="cov7" title="7">if result.MatchedCount == 0 </span><span class="cov4" title="3">{
                 return classifyRespondMiss(ctx, caller, id, constants.FriendshipStatusPending)
         }</span>
-        <span class="cov4" title="3">return nil</span>
+        <span class="cov5" title="4">return nil</span>
 }
 
 // DeclineFriendRequest deletes a pending request. Same caller checks as
@@ -1102,7 +1372,7 @@ func RemoveFriendship(ctx context.Context, caller, id uuid.UUID) error <span cla
 
 // classifyRespondMiss runs one owner-agnostic lookup by id to explain why an atomic
 // owner-scoped write matched nothing. wantStatus is the status the write required.
-func classifyRespondMiss(ctx context.Context, caller, id uuid.UUID, wantStatus string) error <span class="cov7" title="6">{
+func classifyRespondMiss(ctx context.Context, caller, id uuid.UUID, wantStatus string) error <span class="cov6" title="6">{
         var doc friendshipDoc
         err := database.Db.Collection(constants.FriendshipsCollection).
                 FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&amp;doc)
@@ -1209,9 +1479,9 @@ type userSummary struct {
 // lookupUserSummaries best-effort resolves ids to name/email from the users collection. A
 // missing document (or a decode failure on a legacy id shape) just yields no entry - callers
 // treat the enrichment as optional.
-func lookupUserSummaries(ctx context.Context, ids []uuid.UUID) map[uuid.UUID]userSummary <span class="cov9" title="10">{
+func lookupUserSummaries(ctx context.Context, ids []uuid.UUID) map[uuid.UUID]userSummary <span class="cov8" title="10">{
         out := make(map[uuid.UUID]userSummary, len(ids))
-        if len(ids) == 0 </span><span class="cov7" title="6">{
+        if len(ids) == 0 </span><span class="cov6" title="6">{
                 return out
         }</span>
 
@@ -1220,7 +1490,7 @@ func lookupUserSummaries(ctx context.Context, ids []uuid.UUID) map[uuid.UUID]use
                 values = append(values, id)
         }</span>
         <span class="cov5" title="4">filter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: values}}}},
         }}}
 
@@ -1235,13 +1505,14 @@ func lookupUserSummaries(ctx context.Context, ids []uuid.UUID) map[uuid.UUID]use
 }
 </pre>
 		
-		<pre class="file" id="file4" style="display: none">package models
+		<pre class="file" id="file5" style="display: none">package models
 
 import (
         "context"
         "errors"
         "fmt"
         "strings"
+        "time"
 
         "github.com/google/uuid"
         "github.com/sweetrpg/common.go/logging"
@@ -1279,7 +1550,7 @@ type Profile struct {
 // a document: confirmed live, where the stored `_id` was "B3384F5D-..." while this service's own
 // `uuid.UUID.String()` produces "b3384f5d-...". MongoDB string comparison is case-sensitive, so
 // both cases need to be listed explicitly.
-func userIDFilter(id uuid.UUID) bson.D <span class="cov10" title="32">{
+func userIDFilter(id uuid.UUID) bson.D <span class="cov10" title="33">{
         lower := id.String()
         return bson.D{{Key: "_id", Value: bson.D{
                 {Key: "$in", Value: bson.A{id, lower, strings.ToUpper(lower)}},
@@ -1302,7 +1573,7 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
         <span class="cov4" title="4">logging.Logger.Info("step1: LoginProfile found", "subject", subject, "userId", loginProfile.UserID.String())
 
         filter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 userIDFilter(loginProfile.UserID),
         }}}
         var raw bson.Raw
@@ -1330,18 +1601,22 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
 }
 
 // UpdateProfile updates name/bio/website/username for userID - email is never writable through
-// this path (see design.md's "email is read-only" decision). Returns ErrProfileNotFound if
-// userID doesn't match an existing, non-soft-deleted User, or ErrUsernameTaken if username
-// collides with another user (the sparse unique index rejects the write).
-func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website, username string) error <span class="cov4" title="4">{
+// this path (see design.md's "email is read-only" decision). actingUserID is the canonical
+// users._id of the caller (the profile owner - this is a self-service path), stamped onto
+// updated_by. Returns ErrProfileNotFound if userID doesn't match an existing, non-soft-deleted
+// User, or ErrUsernameTaken if username collides with another user (the sparse unique index
+// rejects the write).
+func UpdateProfile(ctx context.Context, userID uuid.UUID, actingUserID, name, bio, website, username string) error <span class="cov4" title="4">{
         filter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 userIDFilter(userID),
         }}}
         set := bson.D{
                 {Key: "name", Value: name},
                 {Key: "bio", Value: bio},
                 {Key: "website", Value: website},
+                {Key: "updated_at", Value: time.Now().UTC()},
+                {Key: "updated_by", Value: actingUserID},
         }
         // Only touch username when a value is given. Writing "" would land an empty string on the
         // sparse unique index (which excludes only *missing* keys, not empty ones), so two cleared
@@ -1365,15 +1640,17 @@ func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website, us
 }
 </pre>
 		
-		<pre class="file" id="file5" style="display: none">package models
+		<pre class="file" id="file6" style="display: none">package models
 
 import (
         "context"
         "errors"
         "fmt"
+        "time"
 
         "github.com/google/uuid"
         "github.com/sweetrpg/common.go/logging"
+        modelcore "github.com/sweetrpg/model-core.go/models"
         "github.com/sweetrpg/mongodb.go/database"
         "github.com/sweetrpg/users-api/constants"
         "go.mongodb.org/mongo-driver/bson"
@@ -1431,10 +1708,10 @@ func EnsureUserIndexes(ctx context.Context) error <span class="cov1" title="1">{
 // LoginProfile the first time that subject is seen. name/email seed the new User doc on creation
 // only - a repeat call for an existing subject never overwrites them (profile edits are a
 // separate change's concern, see design.md).
-func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="19">{
+func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="20">{
         if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
-        }</span> else<span class="cov8" title="19"> if profile != nil </span><span class="cov1" title="1">{
+        }</span> else<span class="cov8" title="20"> if profile != nil </span><span class="cov1" title="1">{
                 // Backfill a username for an existing user that predates the username field. Best
                 // effort - a failure here shouldn't block the login.
                 if err := EnsureUsername(ctx, profile.UserID, usernameSeed(email, name)); err != nil </span><span class="cov0" title="0">{
@@ -1443,12 +1720,14 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
                 <span class="cov1" title="1">return ProvisionResult{UserID: profile.UserID, Created: false}, nil</span>
         }
 
-        <span class="cov8" title="18">userID := uuid.New()
+        <span class="cov8" title="19">userID := uuid.New()
         username, err := GenerateUsername(ctx, usernameSeed(email, name))
         if err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
         }</span>
-        <span class="cov8" title="18">user := userDoc{ID: userID, Name: name, Email: email, Username: username}
+        // A user provisioning their own account on first login is the acting user for that write.
+        <span class="cov8" title="19">user := userDoc{ID: userID, Name: name, Email: email, Username: username}
+        modelcore.StampCreate(&amp;user.Auditable, userID.String(), time.Now().UTC())
         if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov8" title="17">{
                 if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
@@ -1473,14 +1752,15 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
                 }</span>
         }
 
-        <span class="cov8" title="18">profile := loginProfileDoc{
+        <span class="cov8" title="19">profile := loginProfileDoc{
                 ID:               uuid.New(),
                 UserID:           userID,
                 ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
                 ThirdPartyAuthID: subject,
         }
+        modelcore.StampCreate(&amp;profile.Auditable, userID.String(), time.Now().UTC())
         _, err = database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
-        if err == nil </span><span class="cov6" title="9">{
+        if err == nil </span><span class="cov6" title="10">{
                 return ProvisionResult{UserID: userID, Created: true}, nil
         }</span>
         <span class="cov6" title="9">if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
@@ -1510,7 +1790,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 // of adopting the record.
 func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span class="cov8" title="21">{
         filter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 bson.D{{Key: "email", Value: email}},
         }}}
 
@@ -1546,17 +1826,17 @@ func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov9" t
         <span class="cov8" title="21">return id, nil</span>
 }
 
-func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="33">{
+func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="34">{
         filter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
                 bson.D{{Key: "thirdPartyAuthId", Value: subject}},
         }}}
 
         var profile loginProfileDoc
         err := database.Db.Collection(constants.LoginProfilesCollection).FindOne(ctx, filter).Decode(&amp;profile)
-        if err != nil </span><span class="cov8" title="19">{
-                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="19">{
+        if err != nil </span><span class="cov8" title="20">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="20">{
                         return nil, nil
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
@@ -1565,7 +1845,7 @@ func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfi
 }
 </pre>
 		
-		<pre class="file" id="file6" style="display: none">// Package models defines the persisted document shapes for users-api and the
+		<pre class="file" id="file7" style="display: none">// Package models defines the persisted document shapes for users-api and the
 // derived views built from them.
 package models
 
@@ -1573,26 +1853,30 @@ import (
         "context"
 
         "github.com/google/uuid"
+        modelcore "github.com/sweetrpg/model-core.go/models"
         "github.com/sweetrpg/mongodb.go/database"
         "github.com/sweetrpg/users-api/constants"
         "go.mongodb.org/mongo-driver/bson"
 )
 
-// notSoftDeletedFilter matches documents whose deletedAt field is either
-// absent or explicitly null, mirroring Fluent's automatic exclusion of
-// soft-deleted rows (a @Timestamp(on: .delete) field) from an unqualified
-// .all() query. Both collections use the same soft-delete convention.
-var notSoftDeletedFilter = bson.D{
+// notDeletedFilter matches documents that have not been soft-deleted: deleted_at absent or null.
+// This is the platform audit-fields convention (PADR-0001 / docs/data-conventions.md). Pre-Go
+// documents carry a camelCase `deletedAt` from the Swift/Fluent schema; the audit-fields backfill
+// (cmd/backfill-audit-fields) copies that onto `deleted_at`, so this filter alone is sufficient
+// once the backfill has run.
+var notDeletedFilter = bson.D{
         {Key: "$or", Value: bson.A{
-                bson.D{{Key: "deletedAt", Value: bson.D{{Key: "$exists", Value: false}}}},
-                bson.D{{Key: "deletedAt", Value: nil}},
+                bson.D{{Key: "deleted_at", Value: bson.D{{Key: "$exists", Value: false}}}},
+                bson.D{{Key: "deleted_at", Value: nil}},
         }},
 }
 
 // userDoc is the users collection document shape. bio/website/username are additive fields
 // beyond the Swift service's original Fluent schema - missing on any pre-existing document,
 // which the bson driver decodes as the zero value (empty string). username is backfilled lazily
-// (next login or profile edit) rather than by a batch migration; see username.go.
+// (next login or profile edit) rather than by a batch migration; see username.go. The embedded
+// modelcore.Auditable holds the platform audit fields (created_at/by, updated_at/by,
+// deleted_at/by); pre-Go documents get them from cmd/backfill-audit-fields.
 type userDoc struct {
         ID       uuid.UUID `bson:"_id"`
         Name     string    `bson:"name"`
@@ -1600,15 +1884,19 @@ type userDoc struct {
         Bio      string    `bson:"bio"`
         Website  string    `bson:"website"`
         Username string    `bson:"username,omitempty"`
+
+        modelcore.Auditable `bson:",inline"`
 }
 
-// loginProfileDoc is the login_profiles collection document shape, unchanged
-// from the Swift service's Fluent schema (UserModel.LoginProfile).
+// loginProfileDoc is the login_profiles collection document shape (Swift Fluent's
+// UserModel.LoginProfile), plus the embedded platform audit fields.
 type loginProfileDoc struct {
         ID               uuid.UUID `bson:"_id"`
         UserID           uuid.UUID `bson:"userId"`
         ThirdPartyAuth   string    `bson:"thirdPartyAuth"`
         ThirdPartyAuthID string    `bson:"thirdPartyAuthId"`
+
+        modelcore.Auditable `bson:",inline"`
 }
 
 // UserIdentity is a minimal id/email/subject listing for admin-web's
@@ -1630,14 +1918,14 @@ type UserIdentity struct {
 // with the Auth0 subject from their login profile if one exists - the same
 // join AdminUsersController.listUsers performed in Fluent.
 func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) <span class="cov0" title="0">{
-        users, err := database.Query[userDoc](constants.UsersCollection, notSoftDeletedFilter, nil, nil, 0, 0)
+        users, err := database.Query[userDoc](constants.UsersCollection, notDeletedFilter, nil, nil, 0, 0)
         if err != nil </span><span class="cov0" title="0">{
                 return nil, err
         }</span>
 
         <span class="cov0" title="0">profiles, err := database.Query[loginProfileDoc](constants.LoginProfilesCollection, bson.D{
                 {Key: "$and", Value: bson.A{
-                        notSoftDeletedFilter,
+                        notDeletedFilter,
                         bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
                 }},
         }, nil, nil, 0, 0)
@@ -1664,7 +1952,7 @@ func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) <span class
 }
 </pre>
 		
-		<pre class="file" id="file7" style="display: none">package models
+		<pre class="file" id="file8" style="display: none">package models
 
 import (
         "context"
@@ -1672,8 +1960,10 @@ import (
         "fmt"
         "regexp"
         "strings"
+        "time"
 
         "github.com/google/uuid"
+        modelcore "github.com/sweetrpg/model-core.go/models"
         "github.com/sweetrpg/mongodb.go/database"
         "github.com/sweetrpg/users-api/constants"
         "go.mongodb.org/mongo-driver/bson"
@@ -1704,8 +1994,8 @@ func ValidUsername(s string) bool <span class="cov7" title="13">{
 
 // usernameSeed picks the string GenerateUsername derives a username from: the email (its local
 // part is used) when present, otherwise the display name.
-func usernameSeed(email, name string) string <span class="cov10" title="36">{
-        if strings.TrimSpace(email) != "" </span><span class="cov10" title="36">{
+func usernameSeed(email, name string) string <span class="cov10" title="37">{
+        if strings.TrimSpace(email) != "" </span><span class="cov10" title="37">{
                 return email
         }</span>
         <span class="cov0" title="0">return name</span>
@@ -1715,27 +2005,27 @@ func usernameSeed(email, name string) string <span class="cov10" title="36">{
 // of disallowed characters to a single hyphen and trimming leading/trailing separators. A seed
 // that reduces to fewer than usernameMinLength usable characters is padded from a fixed base so
 // the result always satisfies usernameFormat.
-func slugifyUsername(seed string) string <span class="cov9" title="28">{
+func slugifyUsername(seed string) string <span class="cov9" title="29">{
         s := strings.ToLower(strings.TrimSpace(seed))
         // An email seed: keep only the local part.
-        if at := strings.IndexByte(s, '@'); at &gt;= 0 </span><span class="cov8" title="24">{
+        if at := strings.IndexByte(s, '@'); at &gt;= 0 </span><span class="cov9" title="25">{
                 s = s[:at]
         }</span>
-        <span class="cov9" title="28">s = usernameStripRe.ReplaceAllString(s, "-")
+        <span class="cov9" title="29">s = usernameStripRe.ReplaceAllString(s, "-")
         s = strings.Trim(s, "-_")
         if len(s) &lt; usernameMinLength </span><span class="cov1" title="1">{
                 s = (s + "user")[:usernameMinLength]
         }</span>
-        <span class="cov9" title="28">if len(s) &gt; usernameMaxLength </span><span class="cov5" title="6">{
+        <span class="cov9" title="29">if len(s) &gt; usernameMaxLength </span><span class="cov5" title="6">{
                 s = strings.Trim(s[:usernameMaxLength], "-_")
         }</span>
-        <span class="cov9" title="28">return s</span>
+        <span class="cov9" title="29">return s</span>
 }
 
 // usernameTaken reports whether any live user already holds username.
-func usernameTaken(ctx context.Context, username string) (bool, error) <span class="cov8" title="24">{
+func usernameTaken(ctx context.Context, username string) (bool, error) <span class="cov9" title="25">{
         filter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 bson.D{{Key: "username", Value: username}},
         }}}
         n, err := database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
@@ -1745,9 +2035,9 @@ func usernameTaken(ctx context.Context, username string) (bool, error) <span cla
 // GenerateUsername returns a username derived from seed that no live user currently holds,
 // appending "-2", "-3", ... on collision. Returns an error only if the DB is unreachable or the
 // (very wide) collision bound is exhausted.
-func GenerateUsername(ctx context.Context, seed string) (string, error) <span class="cov8" title="22">{
+func GenerateUsername(ctx context.Context, seed string) (string, error) <span class="cov8" title="23">{
         base := slugifyUsername(seed)
-        for i := 1; i &lt;= usernameCollisionTries; i++ </span><span class="cov8" title="24">{
+        for i := 1; i &lt;= usernameCollisionTries; i++ </span><span class="cov9" title="25">{
                 candidate := base
                 if i &gt; 1 </span><span class="cov2" title="2">{
                         suffix := fmt.Sprintf("-%d", i)
@@ -1757,11 +2047,11 @@ func GenerateUsername(ctx context.Context, seed string) (string, error) <span cl
                         }</span>
                         <span class="cov2" title="2">candidate += suffix</span>
                 }
-                <span class="cov8" title="24">taken, err := usernameTaken(ctx, candidate)
+                <span class="cov9" title="25">taken, err := usernameTaken(ctx, candidate)
                 if err != nil </span><span class="cov0" title="0">{
                         return "", err
                 }</span>
-                <span class="cov8" title="24">if !taken </span><span class="cov8" title="22">{
+                <span class="cov9" title="25">if !taken </span><span class="cov8" title="23">{
                         return candidate, nil
                 }</span>
         }
@@ -1773,7 +2063,7 @@ func GenerateUsername(ctx context.Context, seed string) (string, error) <span cl
 // on the write) is treated as success - the other writer set it.
 func EnsureUsername(ctx context.Context, userID uuid.UUID, seed string) error <span class="cov8" title="20">{
         filter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 userIDFilter(userID),
         }}}
 
@@ -1795,14 +2085,19 @@ func EnsureUsername(ctx context.Context, userID uuid.UUID, seed string) error <s
         }</span>
 
         <span class="cov2" title="2">setFilter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 userIDFilter(userID),
                 bson.D{{Key: "$or", Value: bson.A{
                         bson.D{{Key: "username", Value: bson.D{{Key: "$exists", Value: false}}}},
                         bson.D{{Key: "username", Value: ""}},
                 }}},
         }}}
-        update := bson.D{{Key: "$set", Value: bson.D{{Key: "username", Value: username}}}}
+        // Lazy backfill is a system write - stamp updated_at/updated_by with the system sentinel.
+        update := bson.D{{Key: "$set", Value: bson.D{
+                {Key: "username", Value: username},
+                {Key: "updated_at", Value: time.Now().UTC()},
+                {Key: "updated_by", Value: modelcore.SystemActor},
+        }}}
         if _, err := database.Db.Collection(constants.UsersCollection).UpdateOne(ctx, setFilter, update); err != nil </span><span class="cov0" title="0">{
                 if mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                         return nil
@@ -1815,7 +2110,7 @@ func EnsureUsername(ctx context.Context, userID uuid.UUID, seed string) error <s
 // FindUserIDByUsername resolves a username to its live user's id, or ErrUserNotFound.
 func FindUserIDByUsername(ctx context.Context, username string) (uuid.UUID, error) <span class="cov5" title="5">{
         filter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 bson.D{{Key: "username", Value: username}},
         }}}
 
@@ -1851,7 +2146,7 @@ func FindUserIDByEmail(ctx context.Context, email string) (uuid.UUID, error) <sp
 // well-formed UUID that isn't anyone.
 func userExists(ctx context.Context, id uuid.UUID) (bool, error) <span class="cov2" title="2">{
         filter := bson.D{{Key: "$and", Value: bson.A{
-                notSoftDeletedFilter,
+                notDeletedFilter,
                 userIDFilter(id),
         }}}
         n, err := database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
@@ -1859,7 +2154,7 @@ func userExists(ctx context.Context, id uuid.UUID) (bool, error) <span class="co
 }</span>
 </pre>
 		
-		<pre class="file" id="file8" style="display: none">package server
+		<pre class="file" id="file9" style="display: none">package server
 
 import (
         "net/http"
@@ -1940,7 +2235,7 @@ func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file9" style="display: none">package server
+		<pre class="file" id="file10" style="display: none">package server
 
 import (
         "net/http"
@@ -1982,7 +2277,7 @@ func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject 
 }
 </pre>
 		
-		<pre class="file" id="file10" style="display: none">package server
+		<pre class="file" id="file11" style="display: none">package server
 
 import (
         "context"
@@ -2308,7 +2603,7 @@ func listFriendRequestsHandler(authzClient *authz.Client) gin.HandlerFunc <span 
 }
 </pre>
 		
-		<pre class="file" id="file11" style="display: none">package server
+		<pre class="file" id="file12" style="display: none">package server
 
 import (
         "github.com/gin-gonic/gin"
@@ -2324,7 +2619,7 @@ func SetupHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov0" 
 }</span>
 </pre>
 		
-		<pre class="file" id="file12" style="display: none">package server
+		<pre class="file" id="file13" style="display: none">package server
 
 import (
         "net/http"
@@ -2458,7 +2753,7 @@ func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc <span class
                         username = req.Username
                 }</span>
 
-                <span class="cov0" title="0">if err := models.UpdateProfile(c.Request.Context(), existing.UserID, req.Name, req.Bio, req.Website, username); err != nil </span><span class="cov0" title="0">{
+                <span class="cov0" title="0">if err := models.UpdateProfile(c.Request.Context(), existing.UserID, existing.UserID.String(), req.Name, req.Bio, req.Website, username); err != nil </span><span class="cov0" title="0">{
                         switch err </span>{
                         case models.ErrProfileNotFound:<span class="cov0" title="0">
                                 c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})</span>
@@ -2497,7 +2792,7 @@ func validateProfileUpdate(req updateProfileRequest) string <span class="cov10" 
 }
 </pre>
 		
-		<pre class="file" id="file13" style="display: none">package server
+		<pre class="file" id="file14" style="display: none">package server
 
 import (
         "net/http"
@@ -2570,7 +2865,7 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file14" style="display: none">package server
+		<pre class="file" id="file15" style="display: none">package server
 
 import (
         "net/http"
