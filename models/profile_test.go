@@ -54,7 +54,7 @@ func TestUpdateProfile_UpdatesNameBioWebsiteNotEmail(t *testing.T) {
 		t.Fatalf("FindOrCreateUser: %v", err)
 	}
 
-	if err := UpdateProfile(context.Background(), provisioned.UserID, "Ada Lovelace", "Mathematician", "https://example.com", "ada-lovelace"); err != nil {
+	if err := UpdateProfile(context.Background(), provisioned.UserID, provisioned.UserID.String(), "Ada Lovelace", "Mathematician", "https://example.com", "ada-lovelace"); err != nil {
 		t.Fatalf("UpdateProfile: %v", err)
 	}
 
@@ -71,7 +71,7 @@ func TestUpdateProfile_UpdatesNameBioWebsiteNotEmail(t *testing.T) {
 }
 
 func TestUpdateProfile_UnknownUserIDReturnsNotFound(t *testing.T) {
-	err := UpdateProfile(context.Background(), uuid.New(), "x", "y", "", "")
+	err := UpdateProfile(context.Background(), uuid.New(), "acting", "x", "y", "", "")
 	if err != ErrProfileNotFound {
 		t.Errorf("err = %v, want ErrProfileNotFound", err)
 	}
@@ -116,7 +116,7 @@ func TestFindProfileBySubject_ResolvesLegacyUserWithStringID(t *testing.T) {
 		t.Errorf("Name/Email = %q/%q, want Legacy Admin/%s", profile.Name, profile.Email, email)
 	}
 
-	if err := UpdateProfile(context.Background(), legacyUserID, "Updated Name", "bio", "https://example.com", ""); err != nil {
+	if err := UpdateProfile(context.Background(), legacyUserID, legacyUserID.String(), "Updated Name", "bio", "https://example.com", ""); err != nil {
 		t.Fatalf("UpdateProfile against a legacy string _id: %v", err)
 	}
 }
@@ -156,7 +156,7 @@ func TestFindProfileBySubject_ResolvesLegacyUserWithUppercaseStringID(t *testing
 		t.Errorf("UserID = %v, want %v", profile.UserID, legacyUserID)
 	}
 
-	if err := UpdateProfile(context.Background(), legacyUserID, "Updated Name", "bio", "https://example.com", ""); err != nil {
+	if err := UpdateProfile(context.Background(), legacyUserID, legacyUserID.String(), "Updated Name", "bio", "https://example.com", ""); err != nil {
 		t.Fatalf("UpdateProfile against an uppercase legacy string _id: %v", err)
 	}
 }

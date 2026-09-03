@@ -1,3 +1,16 @@
+## [0.11.0] - 2026-09-03
+
+### 🚀 Features
+
+- *(models)* Adopt platform audit-fields convention
+
+### 🧪 Testing
+
+- *(models)* Relax friendship accept audit assertion to millisecond precision
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.10.0
 ## [0.10.0] - 2026-09-01
 
 ### 🚀 Features

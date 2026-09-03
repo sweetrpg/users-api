@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/sweetrpg/common.go/logging"
@@ -65,7 +66,7 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
 	logging.Logger.Info("step1: LoginProfile found", "subject", subject, "userId", loginProfile.UserID.String())
 
 	filter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		userIDFilter(loginProfile.UserID),
 	}}}
 	var raw bson.Raw
@@ -93,18 +94,22 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
 }
 
 // UpdateProfile updates name/bio/website/username for userID - email is never writable through
-// this path (see design.md's "email is read-only" decision). Returns ErrProfileNotFound if
-// userID doesn't match an existing, non-soft-deleted User, or ErrUsernameTaken if username
-// collides with another user (the sparse unique index rejects the write).
-func UpdateProfile(ctx context.Context, userID uuid.UUID, name, bio, website, username string) error {
+// this path (see design.md's "email is read-only" decision). actingUserID is the canonical
+// users._id of the caller (the profile owner - this is a self-service path), stamped onto
+// updated_by. Returns ErrProfileNotFound if userID doesn't match an existing, non-soft-deleted
+// User, or ErrUsernameTaken if username collides with another user (the sparse unique index
+// rejects the write).
+func UpdateProfile(ctx context.Context, userID uuid.UUID, actingUserID, name, bio, website, username string) error {
 	filter := bson.D{{Key: "$and", Value: bson.A{
-		notSoftDeletedFilter,
+		notDeletedFilter,
 		userIDFilter(userID),
 	}}}
 	set := bson.D{
 		{Key: "name", Value: name},
 		{Key: "bio", Value: bio},
 		{Key: "website", Value: website},
+		{Key: "updated_at", Value: time.Now().UTC()},
+		{Key: "updated_by", Value: actingUserID},
 	}
 	// Only touch username when a value is given. Writing "" would land an empty string on the
 	// sparse unique index (which excludes only *missing* keys, not empty ones), so two cleared
