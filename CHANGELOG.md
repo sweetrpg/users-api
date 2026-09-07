@@ -1,3 +1,16 @@
+## [0.12.0] - 2026-09-07
+
+### 🚀 Features
+
+- *(server)* Add POST /internal/resolve-subjects
+
+### 🐛 Bug Fixes
+
+- Refresh interval
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.11.0
 ## [0.11.0] - 2026-09-03
 
 ### 🚀 Features
