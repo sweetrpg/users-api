@@ -8,6 +8,57 @@ definitions:
       subject:
         type: string
     type: object
+  server.friendEntry:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+      since:
+        type: string
+      user_id:
+        type: string
+    type: object
+  server.friendRequestResponse:
+    properties:
+      id:
+        type: string
+      status:
+        type: string
+      user_id:
+        type: string
+    type: object
+  server.friendsResponse:
+    properties:
+      friends:
+        items:
+          $ref: '#/definitions/server.friendEntry'
+        type: array
+    type: object
+  server.pendingRequestEntry:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      user_id:
+        type: string
+    type: object
+  server.pendingRequestsResponse:
+    properties:
+      incoming:
+        items:
+          $ref: '#/definitions/server.pendingRequestEntry'
+        type: array
+      outgoing:
+        items:
+          $ref: '#/definitions/server.pendingRequestEntry'
+        type: array
+    type: object
   server.profileResponse:
     properties:
       bio:
@@ -15,6 +66,10 @@ definitions:
       email:
         type: string
       name:
+        type: string
+      user_id:
+        type: string
+      username:
         type: string
       website:
         type: string
@@ -33,11 +88,28 @@ definitions:
       userId:
         type: string
     type: object
+  server.resolveSubjectsRequest:
+    properties:
+      subjects:
+        items:
+          type: string
+        type: array
+    type: object
+  server.sendFriendRequestRequest:
+    properties:
+      identifier:
+        description: |-
+          Identifier is a User.id, an email, or a username - resolved server-side to the target
+          user (see models.ResolveFriendTarget).
+        type: string
+    type: object
   server.updateProfileRequest:
     properties:
       bio:
         type: string
       name:
+        type: string
+      username:
         type: string
       website:
         type: string
@@ -113,6 +185,173 @@ paths:
       summary: List user identities
       tags:
       - admin
+  /friends:
+    get:
+      description: List the caller's accepted mutual friendships
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.friendsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: List friends
+      tags:
+      - friends
+  /friends/{id}:
+    delete:
+      description: Remove an existing accepted friendship
+      parameters:
+      - description: Friendship id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: Remove a friendship
+      tags:
+      - friends
+  /friends/requests:
+    get:
+      description: List the caller's pending friend requests, split into incoming
+        and outgoing
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.pendingRequestsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: List pending friend requests
+      tags:
+      - friends
+    post:
+      consumes:
+      - application/json
+      description: Send a friend request to another user, identified by User.id, email,
+        or username
+      parameters:
+      - description: Target user identifier
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.sendFriendRequestRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/server.friendRequestResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: Send a friend request
+      tags:
+      - friends
+  /friends/requests/{id}/accept:
+    post:
+      description: Accept or decline a pending friend request the caller received
+      parameters:
+      - description: Friendship id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: Respond to a pending friend request
+      tags:
+      - friends
   /internal/identities/provision:
     post:
       consumes:
@@ -145,6 +384,47 @@ paths:
           schema:
             $ref: '#/definitions/vo.ErrorVO'
       summary: Provision a user identity
+      tags:
+      - internal
+  /internal/resolve-subjects:
+    post:
+      consumes:
+      - application/json
+      description: Resolve a batch of Auth0 subjects to the canonical users._id each
+        maps to
+      parameters:
+      - description: Subjects to resolve
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.resolveSubjectsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: Resolve subjects to user ids
       tags:
       - internal
   /profile:
@@ -200,6 +480,10 @@ paths:
             $ref: '#/definitions/vo.ErrorVO'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/vo.ErrorVO'
         "500":

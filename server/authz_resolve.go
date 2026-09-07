@@ -38,3 +38,33 @@ func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject 
 
 	return result.Sub, true
 }
+
+// resolveAdminSubject forwards the caller's bearer token to auth-api and returns the verified
+// Auth0 subject only when the caller holds the admin role - the write-auth gate shared by the
+// admin routes (GET /admin/users) and the internal resolve-subjects endpoint. Writes the
+// appropriate error response and returns ok=false on failure, so callers can simply
+// `if !ok { return }`.
+func resolveAdminSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) {
+	token := bearerToken(c)
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
+		return "", false
+	}
+
+	result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+	if err != nil {
+		if _, ok := err.(authz.InvalidTokenError); ok {
+			c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
+			return "", false
+		}
+		logging.Logger.Error("authz check failed", "error", err.Error())
+		c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
+		return "", false
+	}
+	if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) {
+		c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller does not have a qualifying role"})
+		return "", false
+	}
+
+	return result.Sub, true
+}
