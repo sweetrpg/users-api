@@ -73,7 +73,7 @@
 				
 				<option value="file8">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
 				
-				<option value="file9">github.com/sweetrpg/users-api/server/admin_users.go (67.9%)</option>
+				<option value="file9">github.com/sweetrpg/users-api/server/admin_users.go (60.0%)</option>
 				
 				<option value="file10">github.com/sweetrpg/users-api/server/authz_resolve.go (81.2%)</option>
 				
@@ -85,7 +85,9 @@
 				
 				<option value="file14">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
 				
-				<option value="file15">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
+				<option value="file15">github.com/sweetrpg/users-api/server/resolve_subjects.go (80.0%)</option>
+				
+				<option value="file16">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
 				
 				</select>
 			</div>
@@ -809,6 +811,256 @@ const docTemplate = `{
                 }
             }
         },
+        "/friends": {
+            "get": {
+                "description": "List the caller's accepted mutual friendships",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "friends"
+                ],
+                "summary": "List friends",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.friendsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
+        "/friends/requests": {
+            "get": {
+                "description": "List the caller's pending friend requests, split into incoming and outgoing",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "friends"
+                ],
+                "summary": "List pending friend requests",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.pendingRequestsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Send a friend request to another user, identified by User.id, email, or username",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "friends"
+                ],
+                "summary": "Send a friend request",
+                "parameters": [
+                    {
+                        "description": "Target user identifier",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.sendFriendRequestRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/server.friendRequestResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
+        "/friends/requests/{id}/accept": {
+            "post": {
+                "description": "Accept or decline a pending friend request the caller received",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "friends"
+                ],
+                "summary": "Respond to a pending friend request",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Friendship id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
+        "/friends/{id}": {
+            "delete": {
+                "description": "Remove an existing accepted friendship",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "friends"
+                ],
+                "summary": "Remove a friendship",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Friendship id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
         "/internal/identities/provision": {
             "post": {
                 "description": "Find or create a User/LoginProfile for the caller's own Auth0 identity",
@@ -848,6 +1100,67 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
+        "/internal/resolve-subjects": {
+            "post": {
+                "description": "Resolve a batch of Auth0 subjects to the canonical users._id each maps to",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "internal"
+                ],
+                "summary": "Resolve subjects to user ids",
+                "parameters": [
+                    {
+                        "description": "Subjects to resolve",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.resolveSubjectsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/vo.ErrorVO"
                         }
@@ -946,6 +1259,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/vo.ErrorVO"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -1011,6 +1330,85 @@ const docTemplate = `{
                 }
             }
         },
+        "server.friendEntry": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "since": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.friendRequestResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.friendsResponse": {
+            "type": "object",
+            "properties": {
+                "friends": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.friendEntry"
+                    }
+                }
+            }
+        },
+        "server.pendingRequestEntry": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.pendingRequestsResponse": {
+            "type": "object",
+            "properties": {
+                "incoming": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.pendingRequestEntry"
+                    }
+                },
+                "outgoing": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.pendingRequestEntry"
+                    }
+                }
+            }
+        },
         "server.profileResponse": {
             "type": "object",
             "properties": {
@@ -1021,6 +1419,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "username": {
                     "type": "string"
                 },
                 "website": {
@@ -1050,6 +1454,26 @@ const docTemplate = `{
                 }
             }
         },
+        "server.resolveSubjectsRequest": {
+            "type": "object",
+            "properties": {
+                "subjects": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "server.sendFriendRequestRequest": {
+            "type": "object",
+            "properties": {
+                "identifier": {
+                    "description": "Identifier is a User.id, an email, or a username - resolved server-side to the target\nuser (see models.ResolveFriendTarget).",
+                    "type": "string"
+                }
+            }
+        },
         "server.updateProfileRequest": {
             "type": "object",
             "properties": {
@@ -1057,6 +1481,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "username": {
                     "type": "string"
                 },
                 "website": {
@@ -1243,10 +1670,10 @@ type FriendRequest struct {
 // orderPair returns x and y sorted so the first return value is the lexicographically smaller
 // of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
 func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="15">{
-        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov8" title="10">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov6" title="5">{
                 return x, y
         }</span>
-        <span class="cov6" title="5">return y, x</span>
+        <span class="cov8" title="10">return y, x</span>
 }
 
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
@@ -1950,6 +2377,38 @@ func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) <span class
         }
         <span class="cov0" title="0">return identities, nil</span>
 }
+
+// ResolveSubjectIDs maps the given Auth0 subjects to the users._id each resolves to, by
+// reversing the ListUserIdentities join: query non-deleted login_profiles for the requested
+// subjects and read the user id off each profile. Unmappable subjects (no non-deleted Auth0
+// login profile) are omitted from the result - the caller decides how to treat them (per
+// design.md Decision 3 of the canonical-user-id-provenance change, the backfill maps leftovers
+// to "system"). Returns an empty (non-nil) map for an empty subject list so it marshals to {}
+// rather than null.
+func ResolveSubjectIDs(ctx context.Context, subjects []string) (map[string]string, error) <span class="cov0" title="0">{
+        if len(subjects) == 0 </span><span class="cov0" title="0">{
+                return map[string]string{}, nil
+        }</span>
+
+        <span class="cov0" title="0">profiles, err := database.Query[loginProfileDoc](constants.LoginProfilesCollection, bson.D{
+                {Key: "$and", Value: bson.A{
+                        notDeletedFilter,
+                        bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
+                        bson.D{{Key: "thirdPartyAuthId", Value: bson.D{{Key: "$in", Value: subjects}}}},
+                }},
+        }, nil, nil, 0, 0)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov0" title="0">resolved := make(map[string]string, len(profiles))
+        for _, p := range profiles </span><span class="cov0" title="0">{
+                if _, exists := resolved[p.ThirdPartyAuthID]; !exists </span><span class="cov0" title="0">{
+                        resolved[p.ThirdPartyAuthID] = p.UserID.String()
+                }</span>
+        }
+        <span class="cov0" title="0">return resolved, nil</span>
+}
 </pre>
 		
 		<pre class="file" id="file8" style="display: none">package models
@@ -2164,7 +2623,6 @@ import (
         apiv "github.com/sweetrpg/api-core.go/vo"
         "github.com/sweetrpg/common.go/logging"
         "github.com/sweetrpg/users-api/authz"
-        "github.com/sweetrpg/users-api/constants"
         "github.com/sweetrpg/users-api/models"
 )
 
@@ -2178,12 +2636,12 @@ func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span cla
         g.GET("/admin/users", listUsersHandler(authzClient))
 }</span>
 
-func bearerToken(c *gin.Context) string <span class="cov10" title="28">{
+func bearerToken(c *gin.Context) string <span class="cov10" title="34">{
         auth := c.GetHeader("Authorization")
-        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov7" title="11">{
+        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov7" title="13">{
                 return ""
         }</span>
-        <span class="cov8" title="17">return strings.TrimPrefix(auth, bearerPrefix)</span>
+        <span class="cov8" title="21">return strings.TrimPrefix(auth, bearerPrefix)</span>
 }
 
 // List user identities.
@@ -2202,24 +2660,7 @@ func bearerToken(c *gin.Context) string <span class="cov10" title="28">{
 //                @Router                        /admin/users [get]
 func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov3" title="3">{
         return func(c *gin.Context) </span><span class="cov4" title="4">{
-                token := bearerToken(c)
-                if token == "" </span><span class="cov2" title="2">{
-                        c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
-                        return
-                }</span>
-
-                <span class="cov2" title="2">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
-                if err != nil </span><span class="cov1" title="1">{
-                        if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov1" title="1">{
-                                c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
-                                return
-                        }</span>
-                        <span class="cov0" title="0">logging.Logger.Error("authz check failed", "error", err.Error())
-                        c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
-                        return</span>
-                }
-                <span class="cov1" title="1">if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) </span><span class="cov1" title="1">{
-                        c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller does not have a qualifying role"})
+                if _, ok := resolveAdminSubject(c, authzClient); !ok </span><span class="cov4" title="4">{
                         return
                 }</span>
 
@@ -2274,6 +2715,36 @@ func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject 
         }</span>
 
         <span class="cov6" title="6">return result.Sub, true</span>
+}
+
+// resolveAdminSubject forwards the caller's bearer token to auth-api and returns the verified
+// Auth0 subject only when the caller holds the admin role - the write-auth gate shared by the
+// admin routes (GET /admin/users) and the internal resolve-subjects endpoint. Writes the
+// appropriate error response and returns ok=false on failure, so callers can simply
+// `if !ok { return }`.
+func resolveAdminSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov7" title="10">{
+        token := bearerToken(c)
+        if token == "" </span><span class="cov4" title="4">{
+                c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
+                return "", false
+        }</span>
+
+        <span class="cov6" title="6">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+        if err != nil </span><span class="cov2" title="2">{
+                if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov2" title="2">{
+                        c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
+                        return "", false
+                }</span>
+                <span class="cov0" title="0">logging.Logger.Error("authz check failed", "error", err.Error())
+                c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
+                return "", false</span>
+        }
+        <span class="cov4" title="4">if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) </span><span class="cov2" title="2">{
+                c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller does not have a qualifying role"})
+                return "", false
+        }</span>
+
+        <span class="cov2" title="2">return result.Sub, true</span>
 }
 </pre>
 		
@@ -2613,6 +3084,7 @@ import (
 func SetupHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov0" title="0">{
         setupAdminUsersHandlers(g, authzClient)
         setupProvisionHandlers(g, authzClient)
+        setupResolveSubjectsHandlers(g, authzClient)
         setupProfileHandlers(g, authzClient)
         setupFriendsHandlers(g, authzClient)
         setupStatusHandlers(g)
@@ -2866,6 +3338,73 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 </pre>
 		
 		<pre class="file" id="file15" style="display: none">package server
+
+import (
+        "net/http"
+
+        "github.com/gin-gonic/gin"
+        apiv "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/users-api/authz"
+        "github.com/sweetrpg/users-api/models"
+)
+
+type resolveSubjectsRequest struct {
+        Subjects []string `json:"subjects"`
+}
+
+func setupResolveSubjectsHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov10" title="6">{
+        logging.Logger.Info("Setting up resolve subjects endpoint handlers...")
+
+        g.POST("/internal/resolve-subjects", resolveSubjectsHandler(authzClient))
+}</span>
+
+// Resolve a batch of Auth0 subjects to the canonical users._id each maps to.
+//
+//         Internal batch endpoint for the canonical-user-id backfills: maps a batch of `*_by` subject
+//         values to the user ids they belong to, so audit fields written with a pre-canonical prompt
+//         subject can be rewritten to the user's canonical id. Requires an admin bearer token, the
+//         same write-auth the admin routes use - the caller is a trusted platform backfill, not an
+//         end user. Subjects with no resolvable user (no non-deleted Auth0 login profile) are omitted
+//         from the response; the caller treats those as the "system" actor (see the
+//         canonical-user-id-provenance design Decision 3).
+//                @Summary                Resolve subjects to user ids
+//                @Description        Resolve a batch of Auth0 subjects to the canonical users._id each maps to
+//                @Tags                        internal
+//                @Accept                        json
+//                @Produce                json
+//                @Param                        request        body                resolveSubjectsRequest        true        "Subjects to resolve"
+//                @Success                200                {object}        map[string]string
+//                @Failure                400                {object}        apiv.ErrorVO
+//                @Failure                401                {object}        apiv.ErrorVO
+//                @Failure                403                {object}        apiv.ErrorVO
+//                @Failure                500                {object}        apiv.ErrorVO
+//                @Router                        /internal/resolve-subjects [post]
+func resolveSubjectsHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov10" title="6">{
+        return func(c *gin.Context) </span><span class="cov10" title="6">{
+                if _, ok := resolveAdminSubject(c, authzClient); !ok </span><span class="cov7" title="4">{
+                        return
+                }</span>
+
+                <span class="cov4" title="2">var req resolveSubjectsRequest
+                if err := c.ShouldBindJSON(&amp;req); err != nil </span><span class="cov1" title="1">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid request body"})
+                        return
+                }</span>
+
+                <span class="cov1" title="1">resolved, err := models.ResolveSubjectIDs(c.Request.Context(), req.Subjects)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to resolve subjects", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to resolve subjects"})
+                        return
+                }</span>
+
+                <span class="cov1" title="1">c.JSON(http.StatusOK, resolved)</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file16" style="display: none">package server
 
 import (
         "net/http"
