@@ -103,3 +103,35 @@ func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) {
 	}
 	return identities, nil
 }
+
+// ResolveSubjectIDs maps the given Auth0 subjects to the users._id each resolves to, by
+// reversing the ListUserIdentities join: query non-deleted login_profiles for the requested
+// subjects and read the user id off each profile. Unmappable subjects (no non-deleted Auth0
+// login profile) are omitted from the result - the caller decides how to treat them (per
+// design.md Decision 3 of the canonical-user-id-provenance change, the backfill maps leftovers
+// to "system"). Returns an empty (non-nil) map for an empty subject list so it marshals to {}
+// rather than null.
+func ResolveSubjectIDs(ctx context.Context, subjects []string) (map[string]string, error) {
+	if len(subjects) == 0 {
+		return map[string]string{}, nil
+	}
+
+	profiles, err := database.Query[loginProfileDoc](constants.LoginProfilesCollection, bson.D{
+		{Key: "$and", Value: bson.A{
+			notDeletedFilter,
+			bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
+			bson.D{{Key: "thirdPartyAuthId", Value: bson.D{{Key: "$in", Value: subjects}}}},
+		}},
+	}, nil, nil, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	resolved := make(map[string]string, len(profiles))
+	for _, p := range profiles {
+		if _, exists := resolved[p.ThirdPartyAuthID]; !exists {
+			resolved[p.ThirdPartyAuthID] = p.UserID.String()
+		}
+	}
+	return resolved, nil
+}
