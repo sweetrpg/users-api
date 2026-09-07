@@ -8,7 +8,6 @@ import (
 	apiv "github.com/sweetrpg/api-core.go/vo"
 	"github.com/sweetrpg/common.go/logging"
 	"github.com/sweetrpg/users-api/authz"
-	"github.com/sweetrpg/users-api/constants"
 	"github.com/sweetrpg/users-api/models"
 )
 
@@ -46,24 +45,7 @@ func bearerToken(c *gin.Context) string {
 //		@Router			/admin/users [get]
 func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := bearerToken(c)
-		if token == "" {
-			c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
-			return
-		}
-
-		result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
-		if err != nil {
-			if _, ok := err.(authz.InvalidTokenError); ok {
-				c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
-				return
-			}
-			logging.Logger.Error("authz check failed", "error", err.Error())
-			c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
-			return
-		}
-		if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) {
-			c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller does not have a qualifying role"})
+		if _, ok := resolveAdminSubject(c, authzClient); !ok {
 			return
 		}
 
