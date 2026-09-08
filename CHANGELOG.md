@@ -1,3 +1,12 @@
+## [0.15.0] - 2026-09-08
+
+### 🚀 Features
+
+- *(admin-stats)* Add GET /admin/stats/history daily user-growth series
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.14.0
 ## [0.14.0] - 2026-09-08
 
 ### 🚀 Features
