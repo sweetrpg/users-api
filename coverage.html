@@ -71,13 +71,13 @@
 				
 				<option value="file7">github.com/sweetrpg/users-api/models/provisioning.go (79.5%)</option>
 				
-				<option value="file8">github.com/sweetrpg/users-api/models/stats.go (85.7%)</option>
+				<option value="file8">github.com/sweetrpg/users-api/models/stats.go (90.0%)</option>
 				
 				<option value="file9">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
 				<option value="file10">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
 				
-				<option value="file11">github.com/sweetrpg/users-api/server/admin_stats.go (60.0%)</option>
+				<option value="file11">github.com/sweetrpg/users-api/server/admin_stats.go (55.0%)</option>
 				
 				<option value="file12">github.com/sweetrpg/users-api/server/admin_users.go (62.5%)</option>
 				
@@ -882,7 +882,7 @@ const docTemplate = `{
     "paths": {
         "/admin/stats": {
             "get": {
-                "description": "Total user count and active user count (login within a rolling 30-day window)",
+                "description": "Total user count, active user count (login within a rolling 30-day window), and new user count (created within a rolling 7-day window)",
                 "produces": [
                     "application/json"
                 ],
@@ -1490,6 +1490,9 @@ const docTemplate = `{
                 "active_users": {
                     "type": "integer"
                 },
+                "new_users": {
+                    "type": "integer"
+                },
                 "total_users": {
                     "type": "integer"
                 }
@@ -1835,10 +1838,10 @@ type FriendRequest struct {
 // orderPair returns x and y sorted so the first return value is the lexicographically smaller
 // of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
 func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="15">{
-        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov8" title="11">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov8" title="9">{
                 return x, y
         }</span>
-        <span class="cov5" title="4">return y, x</span>
+        <span class="cov6" title="6">return y, x</span>
 }
 
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
@@ -2477,6 +2480,17 @@ func CountUsers(ctx context.Context) (int64, error) <span class="cov5" title="2"
         return database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, notDeletedFilter)
 }</span>
 
+// CountNewUsers returns the number of non-soft-deleted user documents created within window
+// ending now - i.e. users with created_at &gt;= now-window.
+func CountNewUsers(ctx context.Context, window time.Duration) (int64, error) <span class="cov5" title="2">{
+        cutoff := time.Now().UTC().Add(-window)
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notDeletedFilter,
+                bson.D{{Key: "created_at", Value: bson.D{{Key: "$gte", Value: cutoff}}}},
+        }}}
+        return database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
+}</span>
+
 // CountActiveUsers returns the number of distinct users whose most recent login falls within
 // window ending now - i.e. login_profiles with last_login_at &gt;= now-window, deduplicated by
 // userId so a user with several login profiles counts once. Soft-deleted profiles are excluded.
@@ -2860,20 +2874,24 @@ import (
 // per the users-api-admin-stats spec.
 const activeUserWindow = 30 * 24 * time.Hour
 
+// newUserWindow is the rolling window a user's creation must fall within to count as new.
+const newUserWindow = 7 * 24 * time.Hour
+
 // adminStatsResponse is a plain JSON object, not a JSON:API resource - a singleton aggregate,
 // matching catalog-api's /stats shape.
 type adminStatsResponse struct {
         TotalUsers  int64 `json:"total_users"`
         ActiveUsers int64 `json:"active_users"`
+        NewUsers    int64 `json:"new_users"`
 }
 
 // Get user population stats.
 //
-//         Total and active user counts for admin-web's platform metrics page. Active = a login within
-//         the last 30 days. Requires a forwarded user bearer token carrying the admin role, same auth
-//         model as GET /admin/users.
+//         Total, active, and new user counts for admin-web's platform metrics page. Active = a login
+//         within the last 30 days; new = created within the last 7 days. Requires a forwarded user
+//         bearer token carrying the admin role, same auth model as GET /admin/users.
 //                @Summary                Get user population stats
-//                @Description        Total user count and active user count (login within a rolling 30-day window)
+//                @Description        Total user count, active user count (login within a rolling 30-day window), and new user count (created within a rolling 7-day window)
 //                @Tags                        admin
 //                @Produce                json
 //                @Success                200                {object}        adminStatsResponse
@@ -2901,8 +2919,14 @@ func adminStatsHandler(authzClient *authz.Client) gin.HandlerFunc <span class="c
                         c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to count active users"})
                         return
                 }</span>
+                <span class="cov1" title="1">newUsers, err := models.CountNewUsers(ctx, newUserWindow)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to count new users", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to count new users"})
+                        return
+                }</span>
 
-                <span class="cov1" title="1">c.JSON(http.StatusOK, adminStatsResponse{TotalUsers: total, ActiveUsers: active})</span>
+                <span class="cov1" title="1">c.JSON(http.StatusOK, adminStatsResponse{TotalUsers: total, ActiveUsers: active, NewUsers: newUsers})</span>
         }
 }
 </pre>
