@@ -8,6 +8,13 @@ definitions:
       subject:
         type: string
     type: object
+  server.adminStatsResponse:
+    properties:
+      active_users:
+        type: integer
+      total_users:
+        type: integer
+    type: object
   server.friendEntry:
     properties:
       email:
@@ -158,6 +165,36 @@ info:
   title: Users API service
   version: "1.0"
 paths:
+  /admin/stats:
+    get:
+      description: Total user count and active user count (login within a rolling
+        30-day window)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.adminStatsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/vo.ErrorVO'
+      summary: Get user population stats
+      tags:
+      - admin
   /admin/users:
     get:
       description: List user identities

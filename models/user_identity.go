@@ -4,6 +4,7 @@ package models
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	modelcore "github.com/sweetrpg/model-core.go/models"
@@ -48,6 +49,12 @@ type loginProfileDoc struct {
 	UserID           uuid.UUID `bson:"userId"`
 	ThirdPartyAuth   string    `bson:"thirdPartyAuth"`
 	ThirdPartyAuthID string    `bson:"thirdPartyAuthId"`
+
+	// LastLoginAt is refreshed to now on every FindOrCreateUser call for this subject - the
+	// per-login timestamp the admin active-user count uses. Absent on rows created before this
+	// field existed until cmd/backfill-last-login seeds them from created_at, or the user's
+	// next login sets it.
+	LastLoginAt *time.Time `bson:"last_login_at,omitempty"`
 
 	modelcore.Auditable `bson:",inline"`
 }
