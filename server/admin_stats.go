@@ -15,20 +15,24 @@ import (
 // per the users-api-admin-stats spec.
 const activeUserWindow = 30 * 24 * time.Hour
 
+// newUserWindow is the rolling window a user's creation must fall within to count as new.
+const newUserWindow = 7 * 24 * time.Hour
+
 // adminStatsResponse is a plain JSON object, not a JSON:API resource - a singleton aggregate,
 // matching catalog-api's /stats shape.
 type adminStatsResponse struct {
 	TotalUsers  int64 `json:"total_users"`
 	ActiveUsers int64 `json:"active_users"`
+	NewUsers    int64 `json:"new_users"`
 }
 
 // Get user population stats.
 //
-//	 Total and active user counts for admin-web's platform metrics page. Active = a login within
-//	 the last 30 days. Requires a forwarded user bearer token carrying the admin role, same auth
-//	 model as GET /admin/users.
+//	 Total, active, and new user counts for admin-web's platform metrics page. Active = a login
+//	 within the last 30 days; new = created within the last 7 days. Requires a forwarded user
+//	 bearer token carrying the admin role, same auth model as GET /admin/users.
 //		@Summary		Get user population stats
-//		@Description	Total user count and active user count (login within a rolling 30-day window)
+//		@Description	Total user count, active user count (login within a rolling 30-day window), and new user count (created within a rolling 7-day window)
 //		@Tags			admin
 //		@Produce		json
 //		@Success		200		{object}	adminStatsResponse
@@ -56,7 +60,13 @@ func adminStatsHandler(authzClient *authz.Client) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to count active users"})
 			return
 		}
+		newUsers, err := models.CountNewUsers(ctx, newUserWindow)
+		if err != nil {
+			logging.Logger.Error("Failed to count new users", "error", err.Error())
+			c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to count new users"})
+			return
+		}
 
-		c.JSON(http.StatusOK, adminStatsResponse{TotalUsers: total, ActiveUsers: active})
+		c.JSON(http.StatusOK, adminStatsResponse{TotalUsers: total, ActiveUsers: active, NewUsers: newUsers})
 	}
 }

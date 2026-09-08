@@ -1,3 +1,12 @@
+## [0.14.0] - 2026-09-08
+
+### 🚀 Features
+
+- *(admin-stats)* Add new_users count to GET /admin/stats
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.13.0
 ## [0.13.0] - 2026-09-08
 
 ### 🚀 Features
