@@ -7,6 +7,7 @@ import (
 	"github.com/sweetrpg/mongodb.go/database"
 	"github.com/sweetrpg/users-api/constants"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // CountUsers returns the number of non-soft-deleted user documents.
@@ -21,6 +22,57 @@ func CountNewUsers(ctx context.Context, window time.Duration) (int64, error) {
 	filter := bson.D{{Key: "$and", Value: bson.A{
 		notDeletedFilter,
 		bson.D{{Key: "created_at", Value: bson.D{{Key: "$gte", Value: cutoff}}}},
+	}}}
+	return database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
+}
+
+// DailyNewUsers returns, per UTC calendar day in [start, end), the count of non-soft-deleted
+// users whose created_at falls in that day, keyed by "2006-01-02". Days with no new users are
+// absent from the map.
+func DailyNewUsers(ctx context.Context, start, end time.Time) (map[string]int64, error) {
+	pipeline := mongo.Pipeline{
+		bson.D{{Key: "$match", Value: bson.D{{Key: "$and", Value: bson.A{
+			notDeletedFilter,
+			bson.D{{Key: "created_at", Value: bson.D{
+				{Key: "$gte", Value: start.UTC()},
+				{Key: "$lt", Value: end.UTC()},
+			}}},
+		}}}}},
+		bson.D{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: bson.D{{Key: "$dateToString", Value: bson.D{
+				{Key: "format", Value: "%Y-%m-%d"},
+				{Key: "date", Value: "$created_at"},
+				{Key: "timezone", Value: "UTC"},
+			}}}},
+			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
+		}}},
+	}
+	cur, err := database.Db.Collection(constants.UsersCollection).Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cur.Close(ctx) }()
+
+	var rows []struct {
+		Day   string `bson:"_id"`
+		Count int64  `bson:"count"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		out[r.Day] = r.Count
+	}
+	return out, nil
+}
+
+// CountUsersCreatedBefore returns the number of non-soft-deleted users created strictly before
+// cutoff.
+func CountUsersCreatedBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	filter := bson.D{{Key: "$and", Value: bson.A{
+		notDeletedFilter,
+		bson.D{{Key: "created_at", Value: bson.D{{Key: "$lt", Value: cutoff.UTC()}}}},
 	}}}
 	return database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
 }

@@ -20,6 +20,7 @@ func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) {
 
 	g.GET("/admin/users", listUsersHandler(authzClient))
 	g.GET("/admin/stats", adminStatsHandler(authzClient))
+	g.GET("/admin/stats/history", adminStatsHistoryHandler(authzClient))
 }
 
 func bearerToken(c *gin.Context) string {
