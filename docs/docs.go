@@ -26,7 +26,7 @@ const docTemplate = `{
     "paths": {
         "/admin/stats": {
             "get": {
-                "description": "Total user count and active user count (login within a rolling 30-day window)",
+                "description": "Total user count, active user count (login within a rolling 30-day window), and new user count (created within a rolling 7-day window)",
                 "produces": [
                     "application/json"
                 ],
@@ -632,6 +632,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "active_users": {
+                    "type": "integer"
+                },
+                "new_users": {
                     "type": "integer"
                 },
                 "total_users": {

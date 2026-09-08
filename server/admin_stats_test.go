@@ -75,6 +75,7 @@ func TestAdminStats_ReturnsCountsForAdmin(t *testing.T) {
 
 	if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, bson.D{
 		{Key: "_id", Value: userID}, {Key: "name", Value: "Admin Stats Fixture"}, {Key: "email", Value: email},
+		{Key: "created_at", Value: recent},
 	}); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
@@ -108,15 +109,20 @@ func TestAdminStats_ReturnsCountsForAdmin(t *testing.T) {
 	}
 	total, hasTotal := body["total_users"]
 	active, hasActive := body["active_users"]
-	if !hasTotal || !hasActive {
+	newUsers, hasNew := body["new_users"]
+	if !hasTotal || !hasActive || !hasNew {
 		t.Fatalf("response missing keys: %s", rec.Body.String())
 	}
 	totalN, _ := total.Int64()
 	activeN, _ := active.Int64()
+	newN, _ := newUsers.Int64()
 	if totalN < 1 {
 		t.Errorf("total_users = %d, want >= 1 (seeded fixture)", totalN)
 	}
 	if activeN < 1 {
 		t.Errorf("active_users = %d, want >= 1 (seeded fixture logged in 24h ago)", activeN)
+	}
+	if newN < 1 {
+		t.Errorf("new_users = %d, want >= 1 (seeded fixture created just now)", newN)
 	}
 }
