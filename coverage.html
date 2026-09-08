@@ -71,15 +71,15 @@
 				
 				<option value="file7">github.com/sweetrpg/users-api/models/provisioning.go (79.5%)</option>
 				
-				<option value="file8">github.com/sweetrpg/users-api/models/stats.go (90.0%)</option>
+				<option value="file8">github.com/sweetrpg/users-api/models/stats.go (88.0%)</option>
 				
 				<option value="file9">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
 				<option value="file10">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
 				
-				<option value="file11">github.com/sweetrpg/users-api/server/admin_stats.go (55.0%)</option>
+				<option value="file11">github.com/sweetrpg/users-api/server/admin_stats.go (73.2%)</option>
 				
-				<option value="file12">github.com/sweetrpg/users-api/server/admin_users.go (62.5%)</option>
+				<option value="file12">github.com/sweetrpg/users-api/server/admin_users.go (64.7%)</option>
 				
 				<option value="file13">github.com/sweetrpg/users-api/server/authz_resolve.go (90.6%)</option>
 				
@@ -924,6 +924,67 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/stats/history": {
+            "get": {
+                "description": "Per-day total and new user counts, oldest first, last element is today",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Daily user-growth history",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Number of days back to include (default 30, clamped to [1, 90])",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/server.adminStatsHistoryEntry"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/users": {
             "get": {
                 "description": "List user identities",
@@ -1484,6 +1545,20 @@ const docTemplate = `{
                 }
             }
         },
+        "server.adminStatsHistoryEntry": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string"
+                },
+                "new_users": {
+                    "type": "integer"
+                },
+                "total_users": {
+                    "type": "integer"
+                }
+            }
+        },
         "server.adminStatsResponse": {
             "type": "object",
             "properties": {
@@ -1838,10 +1913,10 @@ type FriendRequest struct {
 // orderPair returns x and y sorted so the first return value is the lexicographically smaller
 // of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
 func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="15">{
-        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov8" title="9">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov6" title="6">{
                 return x, y
         }</span>
-        <span class="cov6" title="6">return y, x</span>
+        <span class="cov8" title="9">return y, x</span>
 }
 
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
@@ -2473,6 +2548,7 @@ import (
         "github.com/sweetrpg/mongodb.go/database"
         "github.com/sweetrpg/users-api/constants"
         "go.mongodb.org/mongo-driver/bson"
+        "go.mongodb.org/mongo-driver/mongo"
 )
 
 // CountUsers returns the number of non-soft-deleted user documents.
@@ -2487,6 +2563,57 @@ func CountNewUsers(ctx context.Context, window time.Duration) (int64, error) <sp
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notDeletedFilter,
                 bson.D{{Key: "created_at", Value: bson.D{{Key: "$gte", Value: cutoff}}}},
+        }}}
+        return database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
+}</span>
+
+// DailyNewUsers returns, per UTC calendar day in [start, end), the count of non-soft-deleted
+// users whose created_at falls in that day, keyed by "2006-01-02". Days with no new users are
+// absent from the map.
+func DailyNewUsers(ctx context.Context, start, end time.Time) (map[string]int64, error) <span class="cov1" title="1">{
+        pipeline := mongo.Pipeline{
+                bson.D{{Key: "$match", Value: bson.D{{Key: "$and", Value: bson.A{
+                        notDeletedFilter,
+                        bson.D{{Key: "created_at", Value: bson.D{
+                                {Key: "$gte", Value: start.UTC()},
+                                {Key: "$lt", Value: end.UTC()},
+                        }}},
+                }}}}},
+                bson.D{{Key: "$group", Value: bson.D{
+                        {Key: "_id", Value: bson.D{{Key: "$dateToString", Value: bson.D{
+                                {Key: "format", Value: "%Y-%m-%d"},
+                                {Key: "date", Value: "$created_at"},
+                                {Key: "timezone", Value: "UTC"},
+                        }}}},
+                        {Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
+                }}},
+        }
+        cur, err := database.Db.Collection(constants.UsersCollection).Aggregate(ctx, pipeline)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov1" title="1">defer func() </span><span class="cov1" title="1">{ _ = cur.Close(ctx) }</span>()
+
+        <span class="cov1" title="1">var rows []struct {
+                Day   string `bson:"_id"`
+                Count int64  `bson:"count"`
+        }
+        if err := cur.All(ctx, &amp;rows); err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov1" title="1">out := make(map[string]int64, len(rows))
+        for _, r := range rows </span><span class="cov5" title="2">{
+                out[r.Day] = r.Count
+        }</span>
+        <span class="cov1" title="1">return out, nil</span>
+}
+
+// CountUsersCreatedBefore returns the number of non-soft-deleted users created strictly before
+// cutoff.
+func CountUsersCreatedBefore(ctx context.Context, cutoff time.Time) (int64, error) <span class="cov5" title="2">{
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notDeletedFilter,
+                bson.D{{Key: "created_at", Value: bson.D{{Key: "$lt", Value: cutoff.UTC()}}}},
         }}}
         return database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, filter)
 }</span>
@@ -2861,6 +2988,7 @@ func userExists(ctx context.Context, id uuid.UUID) (bool, error) <span class="co
 
 import (
         "net/http"
+        "strconv"
         "time"
 
         "github.com/gin-gonic/gin"
@@ -2900,9 +3028,9 @@ type adminStatsResponse struct {
 //                @Failure                500                {object}        apiv.ErrorVO
 //                @Failure                503                {object}        apiv.ErrorVO
 //                @Router                        /admin/stats [get]
-func adminStatsHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov10" title="7">{
-        return func(c *gin.Context) </span><span class="cov7" title="4">{
-                if _, ok := resolveAdminSubject(c, authzClient); !ok </span><span class="cov6" title="3">{
+func adminStatsHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="10">{
+        return func(c *gin.Context) </span><span class="cov3" title="4">{
+                if _, ok := resolveAdminSubject(c, authzClient); !ok </span><span class="cov3" title="3">{
                         return
                 }</span>
 
@@ -2929,6 +3057,89 @@ func adminStatsHandler(authzClient *authz.Client) gin.HandlerFunc <span class="c
                 <span class="cov1" title="1">c.JSON(http.StatusOK, adminStatsResponse{TotalUsers: total, ActiveUsers: active, NewUsers: newUsers})</span>
         }
 }
+
+const (
+        statsHistoryDefaultDays = 30
+        statsHistoryMinDays     = 1
+        statsHistoryMaxDays     = 90
+)
+
+// adminStatsHistoryEntry is one UTC calendar day's cumulative and same-day user counts.
+type adminStatsHistoryEntry struct {
+        Date       string `json:"date"`
+        TotalUsers int64  `json:"total_users"`
+        NewUsers   int64  `json:"new_users"`
+}
+
+// Get a daily user-growth history.
+//
+//         A per-UTC-calendar-day series ending today, oldest first, for admin-web's metrics chart.
+//         new_users is that day's signups; total_users is the cumulative non-soft-deleted user count
+//         as of the end of that day. No active series - last_login_at only holds the latest login, so
+//         historical daily-active can't be reconstructed. Same admin gate as GET /admin/stats.
+//                @Summary                Daily user-growth history
+//                @Description        Per-day total and new user counts, oldest first, last element is today
+//                @Tags                        admin
+//                @Produce                json
+//                @Param                        days        query                int        false        "Number of days back to include (default 30, clamped to [1, 90])"
+//                @Success                200                {array}                adminStatsHistoryEntry
+//                @Failure                400                {object}        apiv.ErrorVO
+//                @Failure                401                {object}        apiv.ErrorVO
+//                @Failure                403                {object}        apiv.ErrorVO
+//                @Failure                500                {object}        apiv.ErrorVO
+//                @Failure                503                {object}        apiv.ErrorVO
+//                @Router                        /admin/stats/history [get]
+func adminStatsHistoryHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="10">{
+        return func(c *gin.Context) </span><span class="cov4" title="7">{
+                if _, ok := resolveAdminSubject(c, authzClient); !ok </span><span class="cov1" title="1">{
+                        return
+                }</span>
+
+                <span class="cov4" title="6">days := statsHistoryDefaultDays
+                if raw := c.Query("days"); raw != "" </span><span class="cov3" title="5">{
+                        n, err := strconv.Atoi(raw)
+                        if err != nil </span><span class="cov1" title="1">{
+                                c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "days must be an integer"})
+                                return
+                        }</span>
+                        <span class="cov3" title="4">days = n</span>
+                }
+                <span class="cov3" title="5">if days &lt; statsHistoryMinDays </span><span class="cov1" title="1">{
+                        days = statsHistoryMinDays
+                }</span>
+                <span class="cov3" title="5">if days &gt; statsHistoryMaxDays </span><span class="cov1" title="1">{
+                        days = statsHistoryMaxDays
+                }</span>
+
+                <span class="cov3" title="5">ctx := c.Request.Context()
+                now := time.Now().UTC()
+                today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+                windowStart := today.AddDate(0, 0, -(days - 1))
+                windowEnd := today.AddDate(0, 0, 1) // exclusive: tomorrow 00:00Z
+
+                daily, err := models.DailyNewUsers(ctx, windowStart, windowEnd)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to aggregate daily new users", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to build stats history"})
+                        return
+                }</span>
+                <span class="cov3" title="5">cumulative, err := models.CountUsersCreatedBefore(ctx, windowStart)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to count baseline users", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to build stats history"})
+                        return
+                }</span>
+
+                <span class="cov3" title="5">out := make([]adminStatsHistoryEntry, 0, days)
+                for i := 0; i &lt; days; i++ </span><span class="cov10" title="129">{
+                        key := windowStart.AddDate(0, 0, i).Format("2006-01-02")
+                        n := daily[key]
+                        cumulative += n
+                        out = append(out, adminStatsHistoryEntry{Date: key, TotalUsers: cumulative, NewUsers: n})
+                }</span>
+                <span class="cov3" title="5">c.JSON(http.StatusOK, out)</span>
+        }
+}
 </pre>
 		
 		<pre class="file" id="file12" style="display: none">package server
@@ -2948,19 +3159,20 @@ const (
         bearerPrefix = "Bearer "
 )
 
-func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov5" title="7">{
+func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov6" title="10">{
         logging.Logger.Info("Setting up admin users endpoint handlers...")
 
         g.GET("/admin/users", listUsersHandler(authzClient))
         g.GET("/admin/stats", adminStatsHandler(authzClient))
+        g.GET("/admin/stats/history", adminStatsHistoryHandler(authzClient))
 }</span>
 
-func bearerToken(c *gin.Context) string <span class="cov10" title="38">{
+func bearerToken(c *gin.Context) string <span class="cov10" title="45">{
         auth := c.GetHeader("Authorization")
-        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov7" title="14">{
+        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov7" title="15">{
                 return ""
         }</span>
-        <span class="cov8" title="24">return strings.TrimPrefix(auth, bearerPrefix)</span>
+        <span class="cov9" title="30">return strings.TrimPrefix(auth, bearerPrefix)</span>
 }
 
 // List user identities.
@@ -2977,7 +3189,7 @@ func bearerToken(c *gin.Context) string <span class="cov10" title="38">{
 //                @Failure                403                {object}        apiv.ErrorVO
 //                @Failure                500                {object}        apiv.ErrorVO
 //                @Router                        /admin/users [get]
-func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="7">{
+func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov6" title="10">{
         return func(c *gin.Context) </span><span class="cov4" title="4">{
                 if _, ok := resolveAdminSubject(c, authzClient); !ok </span><span class="cov4" title="4">{
                         return
@@ -3041,14 +3253,14 @@ func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject 
 // admin routes (GET /admin/users) and the internal resolve-subjects endpoint. Writes the
 // appropriate error response and returns ok=false on failure, so callers can simply
 // `if !ok { return }`.
-func resolveAdminSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov8" title="14">{
+func resolveAdminSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov9" title="21">{
         token := bearerToken(c)
-        if token == "" </span><span class="cov5" title="5">{
+        if token == "" </span><span class="cov6" title="6">{
                 c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                 return "", false
         }</span>
 
-        <span class="cov7" title="9">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+        <span class="cov8" title="15">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
         if err != nil </span><span class="cov4" title="3">{
                 if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov2" title="2">{
                         c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
@@ -3058,12 +3270,12 @@ func resolveAdminSubject(c *gin.Context, authzClient *authz.Client) (subject str
                 c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
                 return "", false</span>
         }
-        <span class="cov6" title="6">if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) </span><span class="cov4" title="3">{
+        <span class="cov8" title="12">if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) </span><span class="cov4" title="3">{
                 c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller does not have a qualifying role"})
                 return "", false
         }</span>
 
-        <span class="cov4" title="3">return result.Sub, true</span>
+        <span class="cov7" title="9">return result.Sub, true</span>
 }
 </pre>
 		
