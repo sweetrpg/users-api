@@ -28,12 +28,18 @@ type ProvisionResult struct {
 // to call on every startup - CreateOne is idempotent for an identical index definition.
 func EnsureLoginProfileIndexes(ctx context.Context) error {
 	collection := database.Db.Collection(constants.LoginProfilesCollection)
-	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	if _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "thirdPartyAuth", Value: 1},
 			{Key: "thirdPartyAuthId", Value: 1},
 		},
 		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		return err
+	}
+	// Backs the admin active-user count's `last_login_at >= cutoff` scan.
+	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "last_login_at", Value: 1}},
 	})
 	return err
 }
@@ -67,6 +73,8 @@ func EnsureUserIndexes(ctx context.Context) error {
 // only - a repeat call for an existing subject never overwrites them (profile edits are a
 // separate change's concern, see design.md).
 func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) {
+	now := time.Now().UTC()
+
 	if profile, err := findLoginProfileBySubject(ctx, subject); err != nil {
 		return ProvisionResult{}, err
 	} else if profile != nil {
@@ -75,6 +83,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 		if err := EnsureUsername(ctx, profile.UserID, usernameSeed(email, name)); err != nil {
 			logging.Logger.Warn("username backfill failed", "userId", profile.UserID.String(), "error", err.Error())
 		}
+		touchLoginProfile(ctx, profile.ID, now)
 		return ProvisionResult{UserID: profile.UserID, Created: false}, nil
 	}
 
@@ -85,7 +94,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 	}
 	// A user provisioning their own account on first login is the acting user for that write.
 	user := userDoc{ID: userID, Name: name, Email: email, Username: username}
-	modelcore.StampCreate(&user.Auditable, userID.String(), time.Now().UTC())
+	modelcore.StampCreate(&user.Auditable, userID.String(), now)
 	if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil {
 		if !mongo.IsDuplicateKeyError(err) {
 			return ProvisionResult{}, err
@@ -115,8 +124,9 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 		UserID:           userID,
 		ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
 		ThirdPartyAuthID: subject,
+		LastLoginAt:      &now,
 	}
-	modelcore.StampCreate(&profile.Auditable, userID.String(), time.Now().UTC())
+	modelcore.StampCreate(&profile.Auditable, userID.String(), now)
 	_, err = database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
 	if err == nil {
 		return ProvisionResult{UserID: userID, Created: true}, nil
@@ -182,6 +192,20 @@ func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) {
 		return uuid.UUID{}, err
 	}
 	return id, nil
+}
+
+// touchLoginProfile refreshes last_login_at on the given profile. Best-effort telemetry for the
+// admin active-user count: provisioning is the login critical path, so a failed timestamp write
+// is logged and swallowed rather than failing the login.
+func touchLoginProfile(ctx context.Context, profileID uuid.UUID, at time.Time) {
+	_, err := database.Db.Collection(constants.LoginProfilesCollection).UpdateOne(
+		ctx,
+		bson.D{{Key: "_id", Value: profileID}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "last_login_at", Value: at}}}},
+	)
+	if err != nil {
+		logging.Logger.Warn("last_login_at update failed", "profileId", profileID.String(), "error", err.Error())
+	}
 }
 
 func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) {

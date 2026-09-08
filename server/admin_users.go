@@ -19,6 +19,7 @@ func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) {
 	logging.Logger.Info("Setting up admin users endpoint handlers...")
 
 	g.GET("/admin/users", listUsersHandler(authzClient))
+	g.GET("/admin/stats", adminStatsHandler(authzClient))
 }
 
 func bearerToken(c *gin.Context) string {
