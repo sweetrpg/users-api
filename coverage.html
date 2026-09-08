@@ -59,35 +59,41 @@
 				
 				<option value="file1">github.com/sweetrpg/users-api/cmd/backfill-audit-fields/main.go (5.6%)</option>
 				
-				<option value="file2">github.com/sweetrpg/users-api/cmd/users-api/main.go (0.0%)</option>
+				<option value="file2">github.com/sweetrpg/users-api/cmd/backfill-last-login/main.go (0.0%)</option>
 				
-				<option value="file3">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
+				<option value="file3">github.com/sweetrpg/users-api/cmd/users-api/main.go (0.0%)</option>
 				
-				<option value="file4">github.com/sweetrpg/users-api/models/friendship.go (86.7%)</option>
+				<option value="file4">github.com/sweetrpg/users-api/docs/docs.go (0.0%)</option>
 				
-				<option value="file5">github.com/sweetrpg/users-api/models/profile.go (73.8%)</option>
+				<option value="file5">github.com/sweetrpg/users-api/models/friendship.go (86.7%)</option>
 				
-				<option value="file6">github.com/sweetrpg/users-api/models/provisioning.go (80.3%)</option>
+				<option value="file6">github.com/sweetrpg/users-api/models/profile.go (73.8%)</option>
 				
-				<option value="file7">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
+				<option value="file7">github.com/sweetrpg/users-api/models/provisioning.go (79.5%)</option>
 				
-				<option value="file8">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
+				<option value="file8">github.com/sweetrpg/users-api/models/stats.go (85.7%)</option>
 				
-				<option value="file9">github.com/sweetrpg/users-api/server/admin_users.go (60.0%)</option>
+				<option value="file9">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
-				<option value="file10">github.com/sweetrpg/users-api/server/authz_resolve.go (81.2%)</option>
+				<option value="file10">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
 				
-				<option value="file11">github.com/sweetrpg/users-api/server/friends.go (32.7%)</option>
+				<option value="file11">github.com/sweetrpg/users-api/server/admin_stats.go (60.0%)</option>
 				
-				<option value="file12">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				<option value="file12">github.com/sweetrpg/users-api/server/admin_users.go (62.5%)</option>
 				
-				<option value="file13">github.com/sweetrpg/users-api/server/profile.go (44.6%)</option>
+				<option value="file13">github.com/sweetrpg/users-api/server/authz_resolve.go (90.6%)</option>
 				
-				<option value="file14">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				<option value="file14">github.com/sweetrpg/users-api/server/friends.go (32.7%)</option>
 				
-				<option value="file15">github.com/sweetrpg/users-api/server/resolve_subjects.go (80.0%)</option>
+				<option value="file15">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
 				
-				<option value="file16">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
+				<option value="file16">github.com/sweetrpg/users-api/server/profile.go (44.6%)</option>
+				
+				<option value="file17">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				
+				<option value="file18">github.com/sweetrpg/users-api/server/resolve_subjects.go (80.0%)</option>
+				
+				<option value="file19">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
 				
 				</select>
 			</div>
@@ -481,7 +487,111 @@ func findRaw(ctx context.Context, coll string, filter bson.D) ([]bson.Raw, error
 }
 </pre>
 		
-		<pre class="file" id="file2" style="display: none">package main
+		<pre class="file" id="file2" style="display: none">// Command backfill-last-login seeds login_profiles.last_login_at on rows created before that
+// field existed, so users-api's admin active-user count has a value to compare against for
+// pre-existing users. It is idempotent: only rows with a missing or null last_login_at are
+// touched, so a re-run is a no-op.
+//
+// The seed is the profile's own created_at (legacy camelCase createdAt as a fallback, then
+// -migrated-at / now). created_at is a stable floor: unlike updated_at it does not drift on
+// profile edits, so it cannot wrongly inflate "active". Effect: a pre-existing user only counts
+// as active if their login profile was created within the active-user window; otherwise they
+// re-qualify on their next login, which sets last_login_at directly. A conservative undercount
+// that self-corrects forward.
+//
+// Usage:
+//
+//        go run ./cmd/backfill-last-login                          # dry run - reports the count, writes nothing
+//        go run ./cmd/backfill-last-login -apply                   # perform the writes
+//        go run ./cmd/backfill-last-login -apply -migrated-at 2026-08-01T00:00:00Z
+//
+// DB_URI (or the DB_* parts) is read from the environment / .env, same as the service.
+package main
+
+import (
+        "context"
+        "flag"
+        "time"
+
+        "github.com/joho/godotenv"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+)
+
+// needsLastLogin matches a login profile with no usable last_login_at - the idempotency guard.
+var needsLastLogin = bson.D{{Key: "$or", Value: bson.A{
+        bson.D{{Key: "last_login_at", Value: bson.D{{Key: "$exists", Value: false}}}},
+        bson.D{{Key: "last_login_at", Value: nil}},
+}}}
+
+func main() <span class="cov0" title="0">{
+        apply := flag.Bool("apply", false, "perform writes (default: dry run)")
+        migratedAtRaw := flag.String("migrated-at", "", "RFC3339 fallback timestamp when a profile has no created_at (default: now)")
+        flag.Parse()
+
+        _ = godotenv.Load(".env")
+        logging.Init()
+
+        fallback := time.Now().UTC()
+        if *migratedAtRaw != "" </span><span class="cov0" title="0">{
+                parsed, err := time.Parse(time.RFC3339, *migratedAtRaw)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("invalid -migrated-at", "value", *migratedAtRaw, "error", err.Error())
+                        return
+                }</span>
+                <span class="cov0" title="0">fallback = parsed.UTC()</span>
+        }
+
+        <span class="cov0" title="0">database.SetupDatabase()
+        defer database.TeardownDatabase()
+
+        ctx := context.Background()
+        mode := "DRY RUN"
+        if *apply </span><span class="cov0" title="0">{
+                mode = "APPLY"
+        }</span>
+        <span class="cov0" title="0">logging.Logger.Info("backfill-last-login starting", "mode", mode, "fallback", fallback.Format(time.RFC3339))
+
+        cur, err := database.Db.Collection(constants.LoginProfilesCollection).Find(ctx, needsLastLogin)
+        if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("query failed", "error", err.Error())
+                return
+        }</span>
+        <span class="cov0" title="0">var docs []bson.Raw
+        if err := cur.All(ctx, &amp;docs); err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("cursor read failed", "error", err.Error())
+                return
+        }</span>
+
+        <span class="cov0" title="0">n := 0
+        for _, d := range docs </span><span class="cov0" title="0">{
+                seed := fallback
+                for _, key := range []string{"created_at", "createdAt"} </span><span class="cov0" title="0">{
+                        if t, ok := d.Lookup(key).TimeOK(); ok </span><span class="cov0" title="0">{
+                                seed = t.UTC()
+                                break</span>
+                        }
+                }
+                <span class="cov0" title="0">if !*apply </span><span class="cov0" title="0">{
+                        n++
+                        continue</span>
+                }
+                <span class="cov0" title="0">if _, err := database.Db.Collection(constants.LoginProfilesCollection).UpdateOne(ctx,
+                        bson.D{{Key: "_id", Value: d.Lookup("_id")}},
+                        bson.D{{Key: "$set", Value: bson.D{{Key: "last_login_at", Value: seed}}}}); err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("update failed", "error", err.Error())
+                        continue</span>
+                }
+                <span class="cov0" title="0">n++</span>
+        }
+
+        <span class="cov0" title="0">logging.Logger.Info("backfill-last-login done", "login_profiles_backfilled", n, "mode", mode)</span>
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package main
 
 import (
         "context"
@@ -744,7 +854,7 @@ func RateLimiter() gin.HandlerFunc <span class="cov0" title="0">{
 }
 </pre>
 		
-		<pre class="file" id="file3" style="display: none">// Package docs Code generated by swaggo/swag. DO NOT EDIT
+		<pre class="file" id="file4" style="display: none">// Package docs Code generated by swaggo/swag. DO NOT EDIT
 package docs
 
 import "github.com/swaggo/swag"
@@ -770,6 +880,50 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/admin/stats": {
+            "get": {
+                "description": "Total user count and active user count (login within a rolling 30-day window)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get user population stats",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.adminStatsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/vo.ErrorVO"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/users": {
             "get": {
                 "description": "List user identities",
@@ -1330,6 +1484,17 @@ const docTemplate = `{
                 }
             }
         },
+        "server.adminStatsResponse": {
+            "type": "object",
+            "properties": {
+                "active_users": {
+                    "type": "integer"
+                },
+                "total_users": {
+                    "type": "integer"
+                }
+            }
+        },
         "server.friendEntry": {
             "type": "object",
             "properties": {
@@ -1561,7 +1726,7 @@ func init() <span class="cov0" title="0">{
 }</span>
 </pre>
 		
-		<pre class="file" id="file4" style="display: none">package models
+		<pre class="file" id="file5" style="display: none">package models
 
 import (
         "bytes"
@@ -1670,10 +1835,10 @@ type FriendRequest struct {
 // orderPair returns x and y sorted so the first return value is the lexicographically smaller
 // of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
 func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="15">{
-        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov7" title="7">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov6" title="6">{
                 return x, y
         }</span>
-        <span class="cov7" title="8">return y, x</span>
+        <span class="cov8" title="9">return y, x</span>
 }
 
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
@@ -1932,7 +2097,7 @@ func lookupUserSummaries(ctx context.Context, ids []uuid.UUID) map[uuid.UUID]use
 }
 </pre>
 		
-		<pre class="file" id="file5" style="display: none">package models
+		<pre class="file" id="file6" style="display: none">package models
 
 import (
         "context"
@@ -2067,7 +2232,7 @@ func UpdateProfile(ctx context.Context, userID uuid.UUID, actingUserID, name, bi
 }
 </pre>
 		
-		<pre class="file" id="file6" style="display: none">package models
+		<pre class="file" id="file7" style="display: none">package models
 
 import (
         "context"
@@ -2097,15 +2262,21 @@ type ProvisionResult struct {
 // to call on every startup - CreateOne is idempotent for an identical index definition.
 func EnsureLoginProfileIndexes(ctx context.Context) error <span class="cov1" title="1">{
         collection := database.Db.Collection(constants.LoginProfilesCollection)
-        _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+        if _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
                 Keys: bson.D{
                         {Key: "thirdPartyAuth", Value: 1},
                         {Key: "thirdPartyAuthId", Value: 1},
                 },
                 Options: options.Index().SetUnique(true),
+        }); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        // Backs the admin active-user count's `last_login_at &gt;= cutoff` scan.
+        <span class="cov1" title="1">_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+                Keys: bson.D{{Key: "last_login_at", Value: 1}},
         })
-        return err
-}</span>
+        return err</span>
+}
 
 // EnsureUserIndexes creates the unique index on users.email - inherited from the original Swift
 // service's Fluent schema (a `.unique(on: \.$email)` field constraint), but never explicitly
@@ -2136,6 +2307,8 @@ func EnsureUserIndexes(ctx context.Context) error <span class="cov1" title="1">{
 // only - a repeat call for an existing subject never overwrites them (profile edits are a
 // separate change's concern, see design.md).
 func FindOrCreateUser(ctx context.Context, subject, name, email string) (ProvisionResult, error) <span class="cov8" title="20">{
+        now := time.Now().UTC()
+
         if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
                 return ProvisionResult{}, err
         }</span> else<span class="cov8" title="20"> if profile != nil </span><span class="cov1" title="1">{
@@ -2144,7 +2317,8 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
                 if err := EnsureUsername(ctx, profile.UserID, usernameSeed(email, name)); err != nil </span><span class="cov0" title="0">{
                         logging.Logger.Warn("username backfill failed", "userId", profile.UserID.String(), "error", err.Error())
                 }</span>
-                <span class="cov1" title="1">return ProvisionResult{UserID: profile.UserID, Created: false}, nil</span>
+                <span class="cov1" title="1">touchLoginProfile(ctx, profile.ID, now)
+                return ProvisionResult{UserID: profile.UserID, Created: false}, nil</span>
         }
 
         <span class="cov8" title="19">userID := uuid.New()
@@ -2154,7 +2328,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
         }</span>
         // A user provisioning their own account on first login is the acting user for that write.
         <span class="cov8" title="19">user := userDoc{ID: userID, Name: name, Email: email, Username: username}
-        modelcore.StampCreate(&amp;user.Auditable, userID.String(), time.Now().UTC())
+        modelcore.StampCreate(&amp;user.Auditable, userID.String(), now)
         if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov8" title="17">{
                 if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
@@ -2184,8 +2358,9 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
                 UserID:           userID,
                 ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
                 ThirdPartyAuthID: subject,
+                LastLoginAt:      &amp;now,
         }
-        modelcore.StampCreate(&amp;profile.Auditable, userID.String(), time.Now().UTC())
+        modelcore.StampCreate(&amp;profile.Auditable, userID.String(), now)
         _, err = database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile)
         if err == nil </span><span class="cov6" title="10">{
                 return ProvisionResult{UserID: userID, Created: true}, nil
@@ -2253,6 +2428,20 @@ func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov9" t
         <span class="cov8" title="21">return id, nil</span>
 }
 
+// touchLoginProfile refreshes last_login_at on the given profile. Best-effort telemetry for the
+// admin active-user count: provisioning is the login critical path, so a failed timestamp write
+// is logged and swallowed rather than failing the login.
+func touchLoginProfile(ctx context.Context, profileID uuid.UUID, at time.Time) <span class="cov1" title="1">{
+        _, err := database.Db.Collection(constants.LoginProfilesCollection).UpdateOne(
+                ctx,
+                bson.D{{Key: "_id", Value: profileID}},
+                bson.D{{Key: "$set", Value: bson.D{{Key: "last_login_at", Value: at}}}},
+        )
+        if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Warn("last_login_at update failed", "profileId", profileID.String(), "error", err.Error())
+        }</span>
+}
+
 func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="34">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notDeletedFilter,
@@ -2272,12 +2461,47 @@ func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfi
 }
 </pre>
 		
-		<pre class="file" id="file7" style="display: none">// Package models defines the persisted document shapes for users-api and the
+		<pre class="file" id="file8" style="display: none">package models
+
+import (
+        "context"
+        "time"
+
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+)
+
+// CountUsers returns the number of non-soft-deleted user documents.
+func CountUsers(ctx context.Context) (int64, error) <span class="cov5" title="2">{
+        return database.Db.Collection(constants.UsersCollection).CountDocuments(ctx, notDeletedFilter)
+}</span>
+
+// CountActiveUsers returns the number of distinct users whose most recent login falls within
+// window ending now - i.e. login_profiles with last_login_at &gt;= now-window, deduplicated by
+// userId so a user with several login profiles counts once. Soft-deleted profiles are excluded.
+// A user with no last_login_at (never logged in, or a pre-backfill row) is not counted.
+func CountActiveUsers(ctx context.Context, window time.Duration) (int64, error) <span class="cov10" title="4">{
+        cutoff := time.Now().UTC().Add(-window)
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notDeletedFilter,
+                bson.D{{Key: "last_login_at", Value: bson.D{{Key: "$gte", Value: cutoff}}}},
+        }}}
+        values, err := database.Db.Collection(constants.LoginProfilesCollection).Distinct(ctx, "userId", filter)
+        if err != nil </span><span class="cov0" title="0">{
+                return 0, err
+        }</span>
+        <span class="cov10" title="4">return int64(len(values)), nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file9" style="display: none">// Package models defines the persisted document shapes for users-api and the
 // derived views built from them.
 package models
 
 import (
         "context"
+        "time"
 
         "github.com/google/uuid"
         modelcore "github.com/sweetrpg/model-core.go/models"
@@ -2322,6 +2546,12 @@ type loginProfileDoc struct {
         UserID           uuid.UUID `bson:"userId"`
         ThirdPartyAuth   string    `bson:"thirdPartyAuth"`
         ThirdPartyAuthID string    `bson:"thirdPartyAuthId"`
+
+        // LastLoginAt is refreshed to now on every FindOrCreateUser call for this subject - the
+        // per-login timestamp the admin active-user count uses. Absent on rows created before this
+        // field existed until cmd/backfill-last-login seeds them from created_at, or the user's
+        // next login sets it.
+        LastLoginAt *time.Time `bson:"last_login_at,omitempty"`
 
         modelcore.Auditable `bson:",inline"`
 }
@@ -2411,7 +2641,7 @@ func ResolveSubjectIDs(ctx context.Context, subjects []string) (map[string]strin
 }
 </pre>
 		
-		<pre class="file" id="file8" style="display: none">package models
+		<pre class="file" id="file10" style="display: none">package models
 
 import (
         "context"
@@ -2613,7 +2843,71 @@ func userExists(ctx context.Context, id uuid.UUID) (bool, error) <span class="co
 }</span>
 </pre>
 		
-		<pre class="file" id="file9" style="display: none">package server
+		<pre class="file" id="file11" style="display: none">package server
+
+import (
+        "net/http"
+        "time"
+
+        "github.com/gin-gonic/gin"
+        apiv "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/users-api/authz"
+        "github.com/sweetrpg/users-api/models"
+)
+
+// activeUserWindow is the rolling window a login must fall within for a user to count as active,
+// per the users-api-admin-stats spec.
+const activeUserWindow = 30 * 24 * time.Hour
+
+// adminStatsResponse is a plain JSON object, not a JSON:API resource - a singleton aggregate,
+// matching catalog-api's /stats shape.
+type adminStatsResponse struct {
+        TotalUsers  int64 `json:"total_users"`
+        ActiveUsers int64 `json:"active_users"`
+}
+
+// Get user population stats.
+//
+//         Total and active user counts for admin-web's platform metrics page. Active = a login within
+//         the last 30 days. Requires a forwarded user bearer token carrying the admin role, same auth
+//         model as GET /admin/users.
+//                @Summary                Get user population stats
+//                @Description        Total user count and active user count (login within a rolling 30-day window)
+//                @Tags                        admin
+//                @Produce                json
+//                @Success                200                {object}        adminStatsResponse
+//                @Failure                401                {object}        apiv.ErrorVO
+//                @Failure                403                {object}        apiv.ErrorVO
+//                @Failure                500                {object}        apiv.ErrorVO
+//                @Failure                503                {object}        apiv.ErrorVO
+//                @Router                        /admin/stats [get]
+func adminStatsHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov10" title="7">{
+        return func(c *gin.Context) </span><span class="cov7" title="4">{
+                if _, ok := resolveAdminSubject(c, authzClient); !ok </span><span class="cov6" title="3">{
+                        return
+                }</span>
+
+                <span class="cov1" title="1">ctx := c.Request.Context()
+                total, err := models.CountUsers(ctx)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to count users", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to count users"})
+                        return
+                }</span>
+                <span class="cov1" title="1">active, err := models.CountActiveUsers(ctx, activeUserWindow)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to count active users", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to count active users"})
+                        return
+                }</span>
+
+                <span class="cov1" title="1">c.JSON(http.StatusOK, adminStatsResponse{TotalUsers: total, ActiveUsers: active})</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file12" style="display: none">package server
 
 import (
         "net/http"
@@ -2630,18 +2924,19 @@ const (
         bearerPrefix = "Bearer "
 )
 
-func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov3" title="3">{
+func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov5" title="7">{
         logging.Logger.Info("Setting up admin users endpoint handlers...")
 
         g.GET("/admin/users", listUsersHandler(authzClient))
+        g.GET("/admin/stats", adminStatsHandler(authzClient))
 }</span>
 
-func bearerToken(c *gin.Context) string <span class="cov10" title="34">{
+func bearerToken(c *gin.Context) string <span class="cov10" title="38">{
         auth := c.GetHeader("Authorization")
-        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov7" title="13">{
+        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov7" title="14">{
                 return ""
         }</span>
-        <span class="cov8" title="21">return strings.TrimPrefix(auth, bearerPrefix)</span>
+        <span class="cov8" title="24">return strings.TrimPrefix(auth, bearerPrefix)</span>
 }
 
 // List user identities.
@@ -2658,7 +2953,7 @@ func bearerToken(c *gin.Context) string <span class="cov10" title="34">{
 //                @Failure                403                {object}        apiv.ErrorVO
 //                @Failure                500                {object}        apiv.ErrorVO
 //                @Router                        /admin/users [get]
-func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov3" title="3">{
+func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov5" title="7">{
         return func(c *gin.Context) </span><span class="cov4" title="4">{
                 if _, ok := resolveAdminSubject(c, authzClient); !ok </span><span class="cov4" title="4">{
                         return
@@ -2676,7 +2971,7 @@ func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file10" style="display: none">package server
+		<pre class="file" id="file13" style="display: none">package server
 
 import (
         "net/http"
@@ -2722,33 +3017,33 @@ func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject 
 // admin routes (GET /admin/users) and the internal resolve-subjects endpoint. Writes the
 // appropriate error response and returns ok=false on failure, so callers can simply
 // `if !ok { return }`.
-func resolveAdminSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov7" title="10">{
+func resolveAdminSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov8" title="14">{
         token := bearerToken(c)
-        if token == "" </span><span class="cov4" title="4">{
+        if token == "" </span><span class="cov5" title="5">{
                 c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                 return "", false
         }</span>
 
-        <span class="cov6" title="6">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
-        if err != nil </span><span class="cov2" title="2">{
+        <span class="cov7" title="9">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+        if err != nil </span><span class="cov4" title="3">{
                 if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov2" title="2">{
                         c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                         return "", false
                 }</span>
-                <span class="cov0" title="0">logging.Logger.Error("authz check failed", "error", err.Error())
+                <span class="cov1" title="1">logging.Logger.Error("authz check failed", "error", err.Error())
                 c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
                 return "", false</span>
         }
-        <span class="cov4" title="4">if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) </span><span class="cov2" title="2">{
+        <span class="cov6" title="6">if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) </span><span class="cov4" title="3">{
                 c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller does not have a qualifying role"})
                 return "", false
         }</span>
 
-        <span class="cov2" title="2">return result.Sub, true</span>
+        <span class="cov4" title="3">return result.Sub, true</span>
 }
 </pre>
 		
-		<pre class="file" id="file11" style="display: none">package server
+		<pre class="file" id="file14" style="display: none">package server
 
 import (
         "context"
@@ -3074,7 +3369,7 @@ func listFriendRequestsHandler(authzClient *authz.Client) gin.HandlerFunc <span 
 }
 </pre>
 		
-		<pre class="file" id="file12" style="display: none">package server
+		<pre class="file" id="file15" style="display: none">package server
 
 import (
         "github.com/gin-gonic/gin"
@@ -3091,7 +3386,7 @@ func SetupHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov0" 
 }</span>
 </pre>
 		
-		<pre class="file" id="file13" style="display: none">package server
+		<pre class="file" id="file16" style="display: none">package server
 
 import (
         "net/http"
@@ -3264,7 +3559,7 @@ func validateProfileUpdate(req updateProfileRequest) string <span class="cov10" 
 }
 </pre>
 		
-		<pre class="file" id="file14" style="display: none">package server
+		<pre class="file" id="file17" style="display: none">package server
 
 import (
         "net/http"
@@ -3337,7 +3632,7 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file15" style="display: none">package server
+		<pre class="file" id="file18" style="display: none">package server
 
 import (
         "net/http"
@@ -3404,7 +3699,7 @@ func resolveSubjectsHandler(authzClient *authz.Client) gin.HandlerFunc <span cla
 }
 </pre>
 		
-		<pre class="file" id="file16" style="display: none">package server
+		<pre class="file" id="file19" style="display: none">package server
 
 import (
         "net/http"
