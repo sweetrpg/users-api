@@ -47,9 +47,19 @@ Handlers live in `server/` (one file per resource), models in `models/`, env-var
 constants in `constants/`, the entrypoint in `cmd/users-api/main.go`. Swagger docs (`docs/`) are
 generated, not hand-written - see "Running Checks Locally".
 
-The Go rewrite does not use Redis - the Swift service's Redis-backed Vapor session store existed
-only for the OAuth login controllers that were already dead code (see above), so it was dropped
-rather than ported.
+The Go rewrite dropped the Swift service's Redis-backed Vapor session store (it existed only for
+the already-dead OAuth login controllers). Redis is back for one purpose only: the per-client/IP
+rate limiter's distributed counters (see "Rate limiting"), not sessions.
+
+## Rate limiting
+
+Per-client/IP rate limiting is on by default via the shared `api-core.go/ratelimit` middleware
+(Redis-backed counters keyed by `X-API-Key` else client IP, `cheap` tier for `/status/*`,
+fail-closed 503 when Redis is unreachable, 429 on exceed). This replaced the process-wide
+`rate.NewLimiter` bucket. `REDIS_HOST`/`REDIS_PORT` are in the dev configmap; `REDIS_PASS` comes
+from the `api-cache` `ExternalSecret`. Tune with `RATE_LIMIT_CHEAP`/
+`RATE_LIMIT_CHEAP_WINDOW_SECONDS`/`RATE_LIMIT_STANDARD`/`RATE_LIMIT_STANDARD_WINDOW_SECONDS`. See
+`platform`'s `openspec/changes/fix-rate-limiting-per-client-ip`.
 
 ## Deployment
 
