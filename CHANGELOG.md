@@ -1,3 +1,13 @@
+## [0.16.0] - 2026-09-09
+
+### 🚀 Features
+
+- *(ratelimit)* Replace process-wide bucket with shared api-core middleware (#106)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.15.0
+- *(deploy)* Add per-client rate-limit and redis env to dev overlay (#106)
 ## [0.15.0] - 2026-09-08
 
 ### 🚀 Features
