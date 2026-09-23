@@ -67,33 +67,39 @@
 				
 				<option value="file5">github.com/sweetrpg/users-api/models/friendship.go (86.7%)</option>
 				
-				<option value="file6">github.com/sweetrpg/users-api/models/profile.go (73.8%)</option>
+				<option value="file6">github.com/sweetrpg/users-api/models/identities.go (80.6%)</option>
 				
-				<option value="file7">github.com/sweetrpg/users-api/models/provisioning.go (79.5%)</option>
+				<option value="file7">github.com/sweetrpg/users-api/models/link_ticket.go (76.0%)</option>
 				
-				<option value="file8">github.com/sweetrpg/users-api/models/stats.go (88.0%)</option>
+				<option value="file8">github.com/sweetrpg/users-api/models/profile.go (73.8%)</option>
 				
-				<option value="file9">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
+				<option value="file9">github.com/sweetrpg/users-api/models/provisioning.go (73.8%)</option>
 				
-				<option value="file10">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
+				<option value="file10">github.com/sweetrpg/users-api/models/stats.go (88.0%)</option>
 				
-				<option value="file11">github.com/sweetrpg/users-api/server/admin_stats.go (73.2%)</option>
+				<option value="file11">github.com/sweetrpg/users-api/models/user_identity.go (0.0%)</option>
 				
-				<option value="file12">github.com/sweetrpg/users-api/server/admin_users.go (64.7%)</option>
+				<option value="file12">github.com/sweetrpg/users-api/models/username.go (83.1%)</option>
 				
-				<option value="file13">github.com/sweetrpg/users-api/server/authz_resolve.go (90.6%)</option>
+				<option value="file13">github.com/sweetrpg/users-api/server/admin_stats.go (73.2%)</option>
 				
-				<option value="file14">github.com/sweetrpg/users-api/server/friends.go (32.7%)</option>
+				<option value="file14">github.com/sweetrpg/users-api/server/admin_users.go (64.7%)</option>
 				
-				<option value="file15">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
+				<option value="file15">github.com/sweetrpg/users-api/server/authz_resolve.go (90.6%)</option>
 				
-				<option value="file16">github.com/sweetrpg/users-api/server/profile.go (44.6%)</option>
+				<option value="file16">github.com/sweetrpg/users-api/server/friends.go (32.7%)</option>
 				
-				<option value="file17">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				<option value="file17">github.com/sweetrpg/users-api/server/handlers.go (0.0%)</option>
 				
-				<option value="file18">github.com/sweetrpg/users-api/server/resolve_subjects.go (80.0%)</option>
+				<option value="file18">github.com/sweetrpg/users-api/server/identities.go (34.1%)</option>
 				
-				<option value="file19">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
+				<option value="file19">github.com/sweetrpg/users-api/server/profile.go (44.6%)</option>
+				
+				<option value="file20">github.com/sweetrpg/users-api/server/provision.go (58.8%)</option>
+				
+				<option value="file21">github.com/sweetrpg/users-api/server/resolve_subjects.go (80.0%)</option>
+				
+				<option value="file22">github.com/sweetrpg/users-api/server/status.go (0.0%)</option>
 				
 				</select>
 			</div>
@@ -676,6 +682,9 @@ func main() <span class="cov0" title="0">{
         }</span>
         <span class="cov0" title="0">if err := models.EnsureFriendshipIndexes(context.Background()); err != nil </span><span class="cov0" title="0">{
                 logging.Logger.Error("Failed to ensure friendships indexes", "error", err.Error())
+        }</span>
+        <span class="cov0" title="0">if err := models.EnsureLinkTicketIndexes(context.Background()); err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Error("Failed to ensure link_tickets indexes", "error", err.Error())
         }</span>
 
         <span class="cov0" title="0">setupAcuator(r)
@@ -1909,10 +1918,10 @@ type FriendRequest struct {
 // orderPair returns x and y sorted so the first return value is the lexicographically smaller
 // of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
 func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="15">{
-        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov7" title="7">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov6" title="5">{
                 return x, y
         }</span>
-        <span class="cov7" title="8">return y, x</span>
+        <span class="cov8" title="10">return y, x</span>
 }
 
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
@@ -2176,6 +2185,211 @@ func lookupUserSummaries(ctx context.Context, ids []uuid.UUID) map[uuid.UUID]use
 import (
         "context"
         "errors"
+        "strings"
+        "time"
+
+        "github.com/google/uuid"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+)
+
+// ErrLastLoginMethod means an unlink request would leave the caller's User with zero
+// LoginProfile rows - rejected per design.md's "never zero login methods" guarantee, enforced
+// here rather than solely in the users-web UI.
+var ErrLastLoginMethod = errors.New("models: cannot unlink the last remaining login method")
+
+// LinkedIdentity is the self-service view of one of the caller's linked LoginProfile rows.
+type LinkedIdentity struct {
+        LoginProfileID uuid.UUID
+        ConnectionType string
+        LinkedAt       time.Time
+}
+
+// connectionType extracts the Auth0 connection name from a sub value formatted
+// "&lt;connection&gt;|&lt;id&gt;" (e.g. "github|12345", "auth0|abc123", "google-oauth2|98765"). Falls back to
+// the full subject if it doesn't contain the expected separator.
+func connectionType(subject string) string <span class="cov8" title="4">{
+        if idx := strings.IndexByte(subject, '|'); idx &gt;= 0 </span><span class="cov8" title="4">{
+                return subject[:idx]
+        }</span>
+        <span class="cov0" title="0">return subject</span>
+}
+
+// ListLinkedIdentities returns userID's linked LoginProfiles (connection type, linked date).
+func ListLinkedIdentities(ctx context.Context, userID uuid.UUID) ([]LinkedIdentity, error) <span class="cov7" title="3">{
+        profiles, err := loginProfilesForUser(ctx, userID)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov7" title="3">identities := make([]LinkedIdentity, 0, len(profiles))
+        for _, p := range profiles </span><span class="cov8" title="4">{
+                identities = append(identities, LinkedIdentity{
+                        LoginProfileID: p.ID,
+                        ConnectionType: connectionType(p.ThirdPartyAuthID),
+                        LinkedAt:       p.CreatedAt,
+                })
+        }</span>
+        <span class="cov7" title="3">return identities, nil</span>
+}
+
+// UnlinkIdentity removes loginProfileID from userID's linked identities. Returns
+// ErrProfileNotFound if loginProfileID doesn't exist or doesn't belong to userID (never reveals
+// whether it belongs to someone else), or ErrLastLoginMethod if it's userID's only remaining
+// LoginProfile.
+func UnlinkIdentity(ctx context.Context, userID, loginProfileID uuid.UUID) error <span class="cov4" title="2">{
+        profiles, err := loginProfilesForUser(ctx, userID)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov4" title="2">found := false
+        for _, p := range profiles </span><span class="cov4" title="2">{
+                if p.ID == loginProfileID </span><span class="cov4" title="2">{
+                        found = true
+                        break</span>
+                }
+        }
+        <span class="cov4" title="2">if !found </span><span class="cov0" title="0">{
+                return ErrProfileNotFound
+        }</span>
+        <span class="cov4" title="2">if len(profiles) &lt;= 1 </span><span class="cov1" title="1">{
+                return ErrLastLoginMethod
+        }</span>
+
+        // Hard delete, not soft: the (thirdPartyAuth, thirdPartyAuthId) unique index would otherwise
+        // block relinking the same identity later against a soft-deleted row.
+        <span class="cov1" title="1">filter := bson.D{{Key: "_id", Value: loginProfileID}, {Key: "userId", Value: userID}}
+        result, err := database.Db.Collection(constants.LoginProfilesCollection).DeleteOne(ctx, filter)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov1" title="1">if result.DeletedCount == 0 </span><span class="cov0" title="0">{
+                return ErrProfileNotFound
+        }</span>
+        <span class="cov1" title="1">return nil</span>
+}
+
+func loginProfilesForUser(ctx context.Context, userID uuid.UUID) ([]*loginProfileDoc, error) <span class="cov10" title="5">{
+        filter := bson.D{{Key: "$and", Value: bson.A{
+                notDeletedFilter,
+                bson.D{{Key: "userId", Value: userID}},
+                bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
+        }}}
+        return database.Query[loginProfileDoc](constants.LoginProfilesCollection, filter, nil, nil, 0, 0)
+}</span>
+</pre>
+		
+		<pre class="file" id="file7" style="display: none">package models
+
+import (
+        "context"
+        "errors"
+        "time"
+
+        "github.com/google/uuid"
+        "github.com/sweetrpg/mongodb.go/database"
+        "github.com/sweetrpg/users-api/constants"
+        "go.mongodb.org/mongo-driver/bson"
+        "go.mongodb.org/mongo-driver/mongo"
+        "go.mongodb.org/mongo-driver/mongo/options"
+)
+
+// linkTicketTTL is the account-linking ticket lifetime (see design.md's "5-minute TTL" decision).
+// Enforced twice: the Mongo TTL index below reaps expired documents in the background, and
+// consumeLinkTicket re-checks CreatedAt explicitly so a ticket is rejected as expired even in the
+// window before the TTL background job has run.
+const linkTicketTTL = 5 * time.Minute
+
+// ErrTicketNotFound means the ticket id doesn't match any link_tickets document - never minted,
+// or already reaped by the TTL index.
+var ErrTicketNotFound = errors.New("models: link ticket not found")
+
+// ErrTicketExpired means the ticket exists but is older than linkTicketTTL.
+var ErrTicketExpired = errors.New("models: link ticket expired")
+
+// ErrTicketConsumed means the ticket has already been used by an earlier link/complete call.
+var ErrTicketConsumed = errors.New("models: link ticket already consumed")
+
+// ErrLinkConflict means the identity being linked already has a LoginProfile attached to a
+// different User than the one the ticket targets - see design.md's "reject, never merge" rule.
+var ErrLinkConflict = errors.New("models: identity already linked to a different user")
+
+// linkTicketDoc is the link_tickets collection document shape: a short-lived, single-use token
+// binding a link-completion request to the User.id it's allowed to attach an identity to (see
+// design.md's "server-signed ... link ticket" decision).
+type linkTicketDoc struct {
+        ID         uuid.UUID  `bson:"_id"`
+        UserID     uuid.UUID  `bson:"userId"`
+        CreatedAt  time.Time  `bson:"createdAt"`
+        ConsumedAt *time.Time `bson:"consumedAt,omitempty"`
+}
+
+// EnsureLinkTicketIndexes creates the TTL index on link_tickets.createdAt that expires documents
+// linkTicketTTL after creation. Safe to call on every startup - CreateOne is idempotent for an
+// identical index definition.
+func EnsureLinkTicketIndexes(ctx context.Context) error <span class="cov1" title="1">{
+        collection := database.Db.Collection(constants.LinkTicketsCollection)
+        _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+                Keys:    bson.D{{Key: "createdAt", Value: 1}},
+                Options: options.Index().SetExpireAfterSeconds(int32(linkTicketTTL.Seconds())),
+        })
+        return err
+}</span>
+
+// MintLinkTicket creates a new, unconsumed link ticket bound to userID and returns its id.
+func MintLinkTicket(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) <span class="cov0" title="0">{
+        ticket := linkTicketDoc{ID: uuid.New(), UserID: userID, CreatedAt: time.Now().UTC()}
+        if _, err := database.Db.Collection(constants.LinkTicketsCollection).InsertOne(ctx, ticket); err != nil </span><span class="cov0" title="0">{
+                return uuid.UUID{}, err
+        }</span>
+        <span class="cov0" title="0">return ticket.ID, nil</span>
+}
+
+// consumeLinkTicket atomically marks ticketID consumed (matching only a not-yet-consumed
+// document, so a concurrent second call never succeeds) and returns the ticket as it was just
+// before consumption. Distinguishes ErrTicketNotFound/ErrTicketConsumed with a follow-up
+// unconditional lookup only on the failure path, so the common success path costs one round trip.
+func consumeLinkTicket(ctx context.Context, ticketID uuid.UUID, now time.Time) (*linkTicketDoc, error) <span class="cov10" title="12">{
+        collection := database.Db.Collection(constants.LinkTicketsCollection)
+        filter := bson.D{
+                {Key: "_id", Value: ticketID},
+                {Key: "consumedAt", Value: bson.D{{Key: "$exists", Value: false}}},
+        }
+        update := bson.D{{Key: "$set", Value: bson.D{{Key: "consumedAt", Value: now}}}}
+
+        var ticket linkTicketDoc
+        err := collection.FindOneAndUpdate(ctx, filter, update,
+                options.FindOneAndUpdate().SetReturnDocument(options.Before),
+        ).Decode(&amp;ticket)
+        if err != nil </span><span class="cov3" title="2">{
+                if !errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov3" title="2">var existing linkTicketDoc
+                lookupErr := collection.FindOne(ctx, bson.D{{Key: "_id", Value: ticketID}}).Decode(&amp;existing)
+                if errors.Is(lookupErr, mongo.ErrNoDocuments) </span><span class="cov1" title="1">{
+                        return nil, ErrTicketNotFound
+                }</span>
+                <span class="cov1" title="1">if lookupErr != nil </span><span class="cov0" title="0">{
+                        return nil, lookupErr
+                }</span>
+                <span class="cov1" title="1">return nil, ErrTicketConsumed</span>
+        }
+
+        <span class="cov9" title="10">if now.Sub(ticket.CreatedAt) &gt; linkTicketTTL </span><span class="cov1" title="1">{
+                return nil, ErrTicketExpired
+        }</span>
+        <span class="cov8" title="9">return &amp;ticket, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package models
+
+import (
+        "context"
+        "errors"
         "fmt"
         "strings"
         "time"
@@ -2306,7 +2520,7 @@ func UpdateProfile(ctx context.Context, userID uuid.UUID, actingUserID, name, bi
 }
 </pre>
 		
-		<pre class="file" id="file7" style="display: none">package models
+		<pre class="file" id="file9" style="display: none">package models
 
 import (
         "context"
@@ -2403,7 +2617,7 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
         // A user provisioning their own account on first login is the acting user for that write.
         <span class="cov8" title="19">user := userDoc{ID: userID, Name: name, Email: email, Username: username}
         modelcore.StampCreate(&amp;user.Auditable, userID.String(), now)
-        if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov8" title="17">{
+        if _, err := database.Db.Collection(constants.UsersCollection).InsertOne(ctx, user); err != nil </span><span class="cov7" title="17">{
                 if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
                 }</span>
@@ -2414,14 +2628,14 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
                 // below still reflects whether this call is the one that newly links this *subject* -
                 // not whether the User document itself was newly inserted, matching the documented API
                 // contract ("repeat calls for an existing subject return created: false").
-                <span class="cov8" title="17">existingUser, findErr := findUserByEmail(ctx, email)
+                <span class="cov7" title="17">existingUser, findErr := findUserByEmail(ctx, email)
                 if findErr != nil </span><span class="cov0" title="0">{
                         return ProvisionResult{}, findErr
                 }</span>
-                <span class="cov8" title="17">if existingUser == nil </span><span class="cov0" title="0">{
+                <span class="cov7" title="17">if existingUser == nil </span><span class="cov0" title="0">{
                         return ProvisionResult{}, err
                 }</span>
-                <span class="cov8" title="17">userID = existingUser.ID
+                <span class="cov7" title="17">userID = existingUser.ID
                 if ensureErr := EnsureUsername(ctx, userID, usernameSeed(email, name)); ensureErr != nil </span><span class="cov3" title="3">{
                         logging.Logger.Warn("username backfill failed for adopted user", "userId", userID.String(), "error", ensureErr.Error())
                 }</span>
@@ -2458,6 +2672,65 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
         <span class="cov6" title="9">return ProvisionResult{UserID: existing.UserID, Created: false}, nil</span>
 }
 
+// LinkResult is the outcome of LinkIdentity.
+type LinkResult struct {
+        UserID  uuid.UUID
+        Created bool
+}
+
+// LinkIdentity attaches subject's Auth0 identity to the User the given ticket targets, per
+// design.md's conflict-resolution rule: no existing LoginProfile for subject creates one; an
+// existing LoginProfile already on the ticket's User is a no-op success (idempotent re-link);
+// an existing LoginProfile on a *different* User returns ErrLinkConflict with no writes. The
+// ticket is atomically consumed before any LoginProfile write, so a second call with the same
+// ticket always fails with ErrTicketConsumed regardless of the first call's outcome.
+func LinkIdentity(ctx context.Context, subject string, ticketID uuid.UUID) (LinkResult, error) <span class="cov6" title="12">{
+        now := time.Now().UTC()
+
+        ticket, err := consumeLinkTicket(ctx, ticketID, now)
+        if err != nil </span><span class="cov3" title="3">{
+                return LinkResult{}, err
+        }</span>
+
+        <span class="cov6" title="9">if profile, err := findLoginProfileBySubject(ctx, subject); err != nil </span><span class="cov0" title="0">{
+                return LinkResult{}, err
+        }</span> else<span class="cov6" title="9"> if profile != nil </span><span class="cov2" title="2">{
+                if profile.UserID != ticket.UserID </span><span class="cov1" title="1">{
+                        return LinkResult{}, ErrLinkConflict
+                }</span>
+                <span class="cov1" title="1">touchLoginProfile(ctx, profile.ID, now)
+                return LinkResult{UserID: ticket.UserID, Created: false}, nil</span>
+        }
+
+        <span class="cov5" title="7">profile := loginProfileDoc{
+                ID:               uuid.New(),
+                UserID:           ticket.UserID,
+                ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
+                ThirdPartyAuthID: subject,
+                LastLoginAt:      &amp;now,
+        }
+        modelcore.StampCreate(&amp;profile.Auditable, ticket.UserID.String(), now)
+        if _, err := database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile); err != nil </span><span class="cov0" title="0">{
+                if !mongo.IsDuplicateKeyError(err) </span><span class="cov0" title="0">{
+                        return LinkResult{}, err
+                }</span>
+                // Lost a race with a concurrent link/provision for the same subject.
+                <span class="cov0" title="0">existing, findErr := findLoginProfileBySubject(ctx, subject)
+                if findErr != nil </span><span class="cov0" title="0">{
+                        return LinkResult{}, findErr
+                }</span>
+                <span class="cov0" title="0">if existing == nil </span><span class="cov0" title="0">{
+                        return LinkResult{}, err
+                }</span>
+                <span class="cov0" title="0">if existing.UserID != ticket.UserID </span><span class="cov0" title="0">{
+                        return LinkResult{}, ErrLinkConflict
+                }</span>
+                <span class="cov0" title="0">return LinkResult{UserID: ticket.UserID, Created: false}, nil</span>
+        }
+
+        <span class="cov5" title="7">return LinkResult{UserID: ticket.UserID, Created: true}, nil</span>
+}
+
 // findUserByEmail decodes leniently via bson.Raw rather than straight into userDoc: a legacy
 // document predating this Go service (e.g. a manually bootstrapped admin record, see auth-api's
 // AGENTS.md for the equivalent user_roles bootstrap procedure) can have `_id` stored as a plain
@@ -2491,8 +2764,8 @@ func findUserByEmail(ctx context.Context, email string) (*userDoc, error) <span 
 
 // decodeFlexibleUUID accepts both this service's own binary uuid.UUID encoding and a legacy
 // plain-string UUID.
-func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov9" title="26">{
-        if s, ok := v.StringValueOK(); ok </span><span class="cov5" title="5">{
+func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov8" title="26">{
+        if s, ok := v.StringValueOK(); ok </span><span class="cov4" title="5">{
                 return uuid.Parse(s)
         }</span>
         <span class="cov8" title="21">var id uuid.UUID
@@ -2505,7 +2778,7 @@ func decodeFlexibleUUID(v bson.RawValue) (uuid.UUID, error) <span class="cov9" t
 // touchLoginProfile refreshes last_login_at on the given profile. Best-effort telemetry for the
 // admin active-user count: provisioning is the login critical path, so a failed timestamp write
 // is logged and swallowed rather than failing the login.
-func touchLoginProfile(ctx context.Context, profileID uuid.UUID, at time.Time) <span class="cov1" title="1">{
+func touchLoginProfile(ctx context.Context, profileID uuid.UUID, at time.Time) <span class="cov2" title="2">{
         _, err := database.Db.Collection(constants.LoginProfilesCollection).UpdateOne(
                 ctx,
                 bson.D{{Key: "_id", Value: profileID}},
@@ -2516,7 +2789,7 @@ func touchLoginProfile(ctx context.Context, profileID uuid.UUID, at time.Time) <
         }</span>
 }
 
-func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="34">{
+func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfileDoc, error) <span class="cov10" title="43">{
         filter := bson.D{{Key: "$and", Value: bson.A{
                 notDeletedFilter,
                 bson.D{{Key: "thirdPartyAuth", Value: constants.Auth0ThirdPartyAuth}},
@@ -2525,17 +2798,17 @@ func findLoginProfileBySubject(ctx context.Context, subject string) (*loginProfi
 
         var profile loginProfileDoc
         err := database.Db.Collection(constants.LoginProfilesCollection).FindOne(ctx, filter).Decode(&amp;profile)
-        if err != nil </span><span class="cov8" title="20">{
-                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="20">{
+        if err != nil </span><span class="cov8" title="27">{
+                if errors.Is(err, mongo.ErrNoDocuments) </span><span class="cov8" title="27">{
                         return nil, nil
                 }</span>
                 <span class="cov0" title="0">return nil, err</span>
         }
-        <span class="cov7" title="14">return &amp;profile, nil</span>
+        <span class="cov7" title="16">return &amp;profile, nil</span>
 }
 </pre>
 		
-		<pre class="file" id="file8" style="display: none">package models
+		<pre class="file" id="file10" style="display: none">package models
 
 import (
         "context"
@@ -2632,7 +2905,7 @@ func CountActiveUsers(ctx context.Context, window time.Duration) (int64, error) 
 }
 </pre>
 		
-		<pre class="file" id="file9" style="display: none">// Package models defines the persisted document shapes for users-api and the
+		<pre class="file" id="file11" style="display: none">// Package models defines the persisted document shapes for users-api and the
 // derived views built from them.
 package models
 
@@ -2778,7 +3051,7 @@ func ResolveSubjectIDs(ctx context.Context, subjects []string) (map[string]strin
 }
 </pre>
 		
-		<pre class="file" id="file10" style="display: none">package models
+		<pre class="file" id="file12" style="display: none">package models
 
 import (
         "context"
@@ -2980,7 +3253,7 @@ func userExists(ctx context.Context, id uuid.UUID) (bool, error) <span class="co
 }</span>
 </pre>
 		
-		<pre class="file" id="file11" style="display: none">package server
+		<pre class="file" id="file13" style="display: none">package server
 
 import (
         "net/http"
@@ -3138,7 +3411,7 @@ func adminStatsHistoryHandler(authzClient *authz.Client) gin.HandlerFunc <span c
 }
 </pre>
 		
-		<pre class="file" id="file12" style="display: none">package server
+		<pre class="file" id="file14" style="display: none">package server
 
 import (
         "net/http"
@@ -3163,12 +3436,12 @@ func setupAdminUsersHandlers(g *gin.Engine, authzClient *authz.Client) <span cla
         g.GET("/admin/stats/history", adminStatsHistoryHandler(authzClient))
 }</span>
 
-func bearerToken(c *gin.Context) string <span class="cov10" title="45">{
+func bearerToken(c *gin.Context) string <span class="cov10" title="51">{
         auth := c.GetHeader("Authorization")
-        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov7" title="15">{
+        if !strings.HasPrefix(auth, bearerPrefix) </span><span class="cov7" title="19">{
                 return ""
         }</span>
-        <span class="cov9" title="30">return strings.TrimPrefix(auth, bearerPrefix)</span>
+        <span class="cov8" title="32">return strings.TrimPrefix(auth, bearerPrefix)</span>
 }
 
 // List user identities.
@@ -3203,7 +3476,7 @@ func listUsersHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file13" style="display: none">package server
+		<pre class="file" id="file15" style="display: none">package server
 
 import (
         "net/http"
@@ -3219,14 +3492,14 @@ import (
 // verified Auth0 subject, with no role requirement - any authenticated identity may act on its
 // own data. Writes the appropriate error response and returns ok=false if resolution fails, so
 // callers can simply `if !ok { return }`.
-func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov10" title="24">{
+func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov10" title="30">{
         token := bearerToken(c)
-        if token == "" </span><span class="cov7" title="9">{
+        if token == "" </span><span class="cov7" title="13">{
                 c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                 return "", false
         }</span>
 
-        <span class="cov8" title="15">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
+        <span class="cov8" title="17">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
         if err != nil </span><span class="cov6" title="8">{
                 if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov6" title="8">{
                         c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
@@ -3236,12 +3509,12 @@ func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject 
                 c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
                 return "", false</span>
         }
-        <span class="cov6" title="7">if !result.Allowed || result.Sub == "" </span><span class="cov1" title="1">{
+        <span class="cov6" title="9">if !result.Allowed || result.Sub == "" </span><span class="cov1" title="1">{
                 c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller is not authorized"})
                 return "", false
         }</span>
 
-        <span class="cov6" title="6">return result.Sub, true</span>
+        <span class="cov6" title="8">return result.Sub, true</span>
 }
 
 // resolveAdminSubject forwards the caller's bearer token to auth-api and returns the verified
@@ -3251,13 +3524,13 @@ func resolveVerifiedSubject(c *gin.Context, authzClient *authz.Client) (subject 
 // `if !ok { return }`.
 func resolveAdminSubject(c *gin.Context, authzClient *authz.Client) (subject string, ok bool) <span class="cov9" title="21">{
         token := bearerToken(c)
-        if token == "" </span><span class="cov6" title="6">{
+        if token == "" </span><span class="cov5" title="6">{
                 c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                 return "", false
         }</span>
 
         <span class="cov8" title="15">result, err := authzClient.Check(c.Request.Context(), token, constants.ServiceName)
-        if err != nil </span><span class="cov4" title="3">{
+        if err != nil </span><span class="cov3" title="3">{
                 if _, ok := err.(authz.InvalidTokenError); ok </span><span class="cov2" title="2">{
                         c.JSON(http.StatusUnauthorized, apiv.ErrorVO{Error: "unauthorized", Message: "missing or invalid credentials"})
                         return "", false
@@ -3266,16 +3539,16 @@ func resolveAdminSubject(c *gin.Context, authzClient *authz.Client) (subject str
                 c.JSON(http.StatusServiceUnavailable, apiv.ErrorVO{Error: "authz_unavailable", Message: "Unable to verify authorization"})
                 return "", false</span>
         }
-        <span class="cov8" title="12">if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) </span><span class="cov4" title="3">{
+        <span class="cov7" title="12">if !result.Allowed || !authz.HasRole(result.Roles, authz.RoleAdmin) </span><span class="cov3" title="3">{
                 c.JSON(http.StatusForbidden, apiv.ErrorVO{Error: "forbidden", Message: "caller does not have a qualifying role"})
                 return "", false
         }</span>
 
-        <span class="cov7" title="9">return result.Sub, true</span>
+        <span class="cov6" title="9">return result.Sub, true</span>
 }
 </pre>
 		
-		<pre class="file" id="file14" style="display: none">package server
+		<pre class="file" id="file16" style="display: none">package server
 
 import (
         "context"
@@ -3601,7 +3874,7 @@ func listFriendRequestsHandler(authzClient *authz.Client) gin.HandlerFunc <span 
 }
 </pre>
 		
-		<pre class="file" id="file15" style="display: none">package server
+		<pre class="file" id="file17" style="display: none">package server
 
 import (
         "github.com/gin-gonic/gin"
@@ -3613,12 +3886,269 @@ func SetupHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov0" 
         setupProvisionHandlers(g, authzClient)
         setupResolveSubjectsHandlers(g, authzClient)
         setupProfileHandlers(g, authzClient)
+        setupIdentitiesHandlers(g, authzClient)
         setupFriendsHandlers(g, authzClient)
         setupStatusHandlers(g)
 }</span>
 </pre>
 		
-		<pre class="file" id="file16" style="display: none">package server
+		<pre class="file" id="file18" style="display: none">package server
+
+import (
+        "errors"
+        "net/http"
+
+        "github.com/gin-gonic/gin"
+        "github.com/google/uuid"
+        apiv "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+        "github.com/sweetrpg/users-api/authz"
+        "github.com/sweetrpg/users-api/models"
+)
+
+type linkStartResponse struct {
+        Ticket string `json:"ticket"`
+}
+
+type linkCompleteRequest struct {
+        Ticket string `json:"ticket"`
+}
+
+type linkCompleteResponse struct {
+        UserID  string `json:"userId"`
+        Created bool   `json:"created"`
+}
+
+type linkedIdentityResponse struct {
+        LoginProfileID string `json:"loginProfileId"`
+        ConnectionType string `json:"connectionType"`
+        LinkedAt       string `json:"linkedAt"`
+}
+
+func setupIdentitiesHandlers(g *gin.Engine, authzClient *authz.Client) <span class="cov10" title="6">{
+        logging.Logger.Info("Setting up identity linking endpoint handlers...")
+
+        g.POST("/internal/identities/link/start", linkStartHandler(authzClient))
+        g.POST("/internal/identities/link/complete", linkCompleteHandler(authzClient))
+        g.GET("/api/identities", listIdentitiesHandler(authzClient))
+        g.DELETE("/api/identities/:loginProfileId", unlinkIdentityHandler(authzClient))
+}</span>
+
+// Mint a link ticket for the caller's own account.
+//
+//         Called by auth-web on behalf of an already-active session, forwarding that session's own
+//         Auth0 access token as the bearer credential - verified against auth-api, same as every other
+//         self-service route in this service, rather than a caller-supplied User.id. This is a
+//         deliberate deviation from design.md's original "shared internal-service-secret" sketch:
+//         add-users-api-provisioning never actually added that mechanism (see this service's own
+//         AGENTS.md - the shared-secret fallback was removed, not extended), and resolving the target
+//         User.id from the caller's own verified subject removes the need for one entirely, matching
+//         POST /internal/identities/provision's existing pattern.
+//                @Summary                Mint a link ticket
+//                @Description        Mint a short-lived, single-use ticket to link a second identity to the caller's account
+//                @Tags                        internal
+//                @Produce                json
+//                @Success                200        {object}        linkStartResponse
+//                @Failure                401        {object}        apiv.ErrorVO
+//                @Failure                404        {object}        apiv.ErrorVO
+//                @Failure                500        {object}        apiv.ErrorVO
+//                @Router                        /internal/identities/link/start [post]
+func linkStartHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov10" title="6">{
+        return func(c *gin.Context) </span><span class="cov1" title="1">{
+                subject, ok := resolveVerifiedSubject(c, authzClient)
+                if !ok </span><span class="cov1" title="1">{
+                        return
+                }</span>
+
+                <span class="cov0" title="0">profile, err := models.FindProfileBySubject(c.Request.Context(), subject)
+                if err != nil </span><span class="cov0" title="0">{
+                        if err == models.ErrProfileNotFound </span><span class="cov0" title="0">{
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
+                                return
+                        }</span>
+                        <span class="cov0" title="0">logging.Logger.Error("Failed to resolve caller for link ticket", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to resolve caller"})
+                        return</span>
+                }
+
+                <span class="cov0" title="0">ticket, err := models.MintLinkTicket(c.Request.Context(), profile.UserID)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to mint link ticket", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "mint_failed", Message: "failed to mint link ticket"})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">c.JSON(http.StatusOK, linkStartResponse{Ticket: ticket.String()})</span>
+        }
+}
+
+// Complete a link ticket, attaching the caller's verified identity to the ticket's target User.
+//
+//         Called by auth-web after the second identity's Auth0 round trip completes. The bearer token
+//         verifies the identity being linked (auth-api's /authz/check, same as every other self-service
+//         route); the ticket - minted by link/start against the original session - carries the target
+//         User.id, so the client never gets to assert which account to link into.
+//                @Summary                Complete a link ticket
+//                @Description        Attach the caller's verified identity to the ticket's target User
+//                @Tags                        internal
+//                @Accept                        json
+//                @Produce                json
+//                @Param                        request        body                linkCompleteRequest        true        "Completion request"
+//                @Success                200                {object}        linkCompleteResponse
+//                @Failure                400                {object}        apiv.ErrorVO
+//                @Failure                401                {object}        apiv.ErrorVO
+//                @Failure                409                {object}        apiv.ErrorVO
+//                @Failure                410                {object}        apiv.ErrorVO
+//                @Failure                500                {object}        apiv.ErrorVO
+//                @Router                        /internal/identities/link/complete [post]
+func linkCompleteHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov10" title="6">{
+        return func(c *gin.Context) </span><span class="cov4" title="2">{
+                subject, ok := resolveVerifiedSubject(c, authzClient)
+                if !ok </span><span class="cov1" title="1">{
+                        return
+                }</span>
+
+                <span class="cov1" title="1">var req linkCompleteRequest
+                if err := c.ShouldBindJSON(&amp;req); err != nil </span><span class="cov0" title="0">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid request body"})
+                        return
+                }</span>
+                <span class="cov1" title="1">ticketID, err := uuid.Parse(req.Ticket)
+                if err != nil </span><span class="cov1" title="1">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid ticket"})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">result, err := models.LinkIdentity(c.Request.Context(), subject, ticketID)
+                if err != nil </span><span class="cov0" title="0">{
+                        switch </span>{
+                        case errors.Is(err, models.ErrTicketNotFound):<span class="cov0" title="0">
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "ticket_not_found", Message: "link ticket not found"})</span>
+                        case errors.Is(err, models.ErrTicketExpired):<span class="cov0" title="0">
+                                c.JSON(http.StatusGone, apiv.ErrorVO{Error: "ticket_expired", Message: "link ticket expired"})</span>
+                        case errors.Is(err, models.ErrTicketConsumed):<span class="cov0" title="0">
+                                c.JSON(http.StatusGone, apiv.ErrorVO{Error: "ticket_consumed", Message: "link ticket already used"})</span>
+                        case errors.Is(err, models.ErrLinkConflict):<span class="cov0" title="0">
+                                c.JSON(http.StatusConflict, apiv.ErrorVO{Error: "identity_conflict", Message: "this identity is already linked to a different account"})</span>
+                        default:<span class="cov0" title="0">
+                                logging.Logger.Error("Failed to complete identity link", "error", err.Error())
+                                c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "link_failed", Message: "failed to link identity"})</span>
+                        }
+                        <span class="cov0" title="0">return</span>
+                }
+
+                <span class="cov0" title="0">c.JSON(http.StatusOK, linkCompleteResponse{UserID: result.UserID.String(), Created: result.Created})</span>
+        }
+}
+
+// List the caller's linked login methods.
+//
+//         Resolved via the caller's own verified Auth0 subject.
+//                @Summary                List linked identities
+//                @Description        List the caller's linked login methods
+//                @Tags                        identities
+//                @Produce                json
+//                @Success                200        {array}                linkedIdentityResponse
+//                @Failure                401        {object}        apiv.ErrorVO
+//                @Failure                404        {object}        apiv.ErrorVO
+//                @Failure                500        {object}        apiv.ErrorVO
+//                @Router                        /api/identities [get]
+func listIdentitiesHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov10" title="6">{
+        return func(c *gin.Context) </span><span class="cov1" title="1">{
+                subject, ok := resolveVerifiedSubject(c, authzClient)
+                if !ok </span><span class="cov1" title="1">{
+                        return
+                }</span>
+
+                <span class="cov0" title="0">profile, err := models.FindProfileBySubject(c.Request.Context(), subject)
+                if err != nil </span><span class="cov0" title="0">{
+                        if err == models.ErrProfileNotFound </span><span class="cov0" title="0">{
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
+                                return
+                        }</span>
+                        <span class="cov0" title="0">logging.Logger.Error("Failed to resolve caller for identity listing", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to resolve caller"})
+                        return</span>
+                }
+
+                <span class="cov0" title="0">identities, err := models.ListLinkedIdentities(c.Request.Context(), profile.UserID)
+                if err != nil </span><span class="cov0" title="0">{
+                        logging.Logger.Error("Failed to list linked identities", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to list linked identities"})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">out := make([]linkedIdentityResponse, 0, len(identities))
+                for _, id := range identities </span><span class="cov0" title="0">{
+                        out = append(out, linkedIdentityResponse{
+                                LoginProfileID: id.LoginProfileID.String(),
+                                ConnectionType: id.ConnectionType,
+                                LinkedAt:       id.LinkedAt.Format("2006-01-02T15:04:05Z07:00"),
+                        })
+                }</span>
+                <span class="cov0" title="0">c.JSON(http.StatusOK, out)</span>
+        }
+}
+
+// Unlink one of the caller's login methods.
+//
+//         Resolved via the caller's own verified Auth0 subject; a client cannot target any other
+//         user's LoginProfile. Rejects the request if it would leave the caller with zero login
+//         methods.
+//                @Summary                Unlink a login method
+//                @Description        Unlink one of the caller's linked login methods
+//                @Tags                        identities
+//                @Produce                json
+//                @Param                        loginProfileId        path        string        true        "Login profile id"
+//                @Success                204
+//                @Failure                401        {object}        apiv.ErrorVO
+//                @Failure                404        {object}        apiv.ErrorVO
+//                @Failure                409        {object}        apiv.ErrorVO
+//                @Failure                500        {object}        apiv.ErrorVO
+//                @Router                        /api/identities/{loginProfileId} [delete]
+func unlinkIdentityHandler(authzClient *authz.Client) gin.HandlerFunc <span class="cov10" title="6">{
+        return func(c *gin.Context) </span><span class="cov4" title="2">{
+                subject, ok := resolveVerifiedSubject(c, authzClient)
+                if !ok </span><span class="cov1" title="1">{
+                        return
+                }</span>
+
+                <span class="cov1" title="1">loginProfileID, err := uuid.Parse(c.Param("loginProfileId"))
+                if err != nil </span><span class="cov1" title="1">{
+                        c.JSON(http.StatusBadRequest, apiv.ErrorVO{Error: "invalid_request", Message: "invalid login profile id"})
+                        return
+                }</span>
+
+                <span class="cov0" title="0">profile, err := models.FindProfileBySubject(c.Request.Context(), subject)
+                if err != nil </span><span class="cov0" title="0">{
+                        if err == models.ErrProfileNotFound </span><span class="cov0" title="0">{
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
+                                return
+                        }</span>
+                        <span class="cov0" title="0">logging.Logger.Error("Failed to resolve caller for unlink", "error", err.Error())
+                        c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "query_failed", Message: "failed to resolve caller"})
+                        return</span>
+                }
+
+                <span class="cov0" title="0">if err := models.UnlinkIdentity(c.Request.Context(), profile.UserID, loginProfileID); err != nil </span><span class="cov0" title="0">{
+                        switch </span>{
+                        case errors.Is(err, models.ErrProfileNotFound):<span class="cov0" title="0">
+                                c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "login profile not found"})</span>
+                        case errors.Is(err, models.ErrLastLoginMethod):<span class="cov0" title="0">
+                                c.JSON(http.StatusConflict, apiv.ErrorVO{Error: "last_login_method", Message: "cannot unlink your only remaining login method"})</span>
+                        default:<span class="cov0" title="0">
+                                logging.Logger.Error("Failed to unlink identity", "error", err.Error())
+                                c.JSON(http.StatusInternalServerError, apiv.ErrorVO{Error: "unlink_failed", Message: "failed to unlink identity"})</span>
+                        }
+                        <span class="cov0" title="0">return</span>
+                }
+
+                <span class="cov0" title="0">c.Status(http.StatusNoContent)</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file19" style="display: none">package server
 
 import (
         "net/http"
@@ -3791,7 +4321,7 @@ func validateProfileUpdate(req updateProfileRequest) string <span class="cov10" 
 }
 </pre>
 		
-		<pre class="file" id="file17" style="display: none">package server
+		<pre class="file" id="file20" style="display: none">package server
 
 import (
         "net/http"
@@ -3864,7 +4394,7 @@ func provisionHandler(authzClient *authz.Client) gin.HandlerFunc <span class="co
 }
 </pre>
 		
-		<pre class="file" id="file18" style="display: none">package server
+		<pre class="file" id="file21" style="display: none">package server
 
 import (
         "net/http"
@@ -3931,7 +4461,7 @@ func resolveSubjectsHandler(authzClient *authz.Client) gin.HandlerFunc <span cla
 }
 </pre>
 		
-		<pre class="file" id="file19" style="display: none">package server
+		<pre class="file" id="file22" style="display: none">package server
 
 import (
         "net/http"
