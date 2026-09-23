@@ -37,9 +37,9 @@ var ErrLinkConflict = errors.New("models: identity already linked to a different
 // binding a link-completion request to the User.id it's allowed to attach an identity to (see
 // design.md's "server-signed ... link ticket" decision).
 type linkTicketDoc struct {
-	ID        uuid.UUID  `bson:"_id"`
-	UserID    uuid.UUID  `bson:"userId"`
-	CreatedAt time.Time  `bson:"createdAt"`
+	ID         uuid.UUID  `bson:"_id"`
+	UserID     uuid.UUID  `bson:"userId"`
+	CreatedAt  time.Time  `bson:"createdAt"`
 	ConsumedAt *time.Time `bson:"consumedAt,omitempty"`
 }
 
