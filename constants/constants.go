@@ -42,6 +42,11 @@ const (
 	// openspec/changes/add-users-api-friends in sweetrpg/platform.
 	FriendshipsCollection = "friendships"
 
+	// LinkTicketsCollection is the MongoDB collection for short-lived,
+	// single-use account-linking tickets - see
+	// openspec/changes/link-user-accounts in sweetrpg/platform.
+	LinkTicketsCollection = "link_tickets"
+
 	// FriendshipStatusPending marks a request that the recipient has not yet
 	// accepted - not a friendship.
 	FriendshipStatusPending = "pending"
