@@ -40,6 +40,10 @@ func TestMain(m *testing.M) {
 		fmt.Println("failed to ensure friendships indexes:", err)
 		os.Exit(1)
 	}
+	if err := EnsureLinkTicketIndexes(context.Background()); err != nil {
+		fmt.Println("failed to ensure link_tickets indexes:", err)
+		os.Exit(1)
+	}
 
 	code := m.Run()
 

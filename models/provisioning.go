@@ -150,6 +150,65 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 	return ProvisionResult{UserID: existing.UserID, Created: false}, nil
 }
 
+// LinkResult is the outcome of LinkIdentity.
+type LinkResult struct {
+	UserID  uuid.UUID
+	Created bool
+}
+
+// LinkIdentity attaches subject's Auth0 identity to the User the given ticket targets, per
+// design.md's conflict-resolution rule: no existing LoginProfile for subject creates one; an
+// existing LoginProfile already on the ticket's User is a no-op success (idempotent re-link);
+// an existing LoginProfile on a *different* User returns ErrLinkConflict with no writes. The
+// ticket is atomically consumed before any LoginProfile write, so a second call with the same
+// ticket always fails with ErrTicketConsumed regardless of the first call's outcome.
+func LinkIdentity(ctx context.Context, subject string, ticketID uuid.UUID) (LinkResult, error) {
+	now := time.Now().UTC()
+
+	ticket, err := consumeLinkTicket(ctx, ticketID, now)
+	if err != nil {
+		return LinkResult{}, err
+	}
+
+	if profile, err := findLoginProfileBySubject(ctx, subject); err != nil {
+		return LinkResult{}, err
+	} else if profile != nil {
+		if profile.UserID != ticket.UserID {
+			return LinkResult{}, ErrLinkConflict
+		}
+		touchLoginProfile(ctx, profile.ID, now)
+		return LinkResult{UserID: ticket.UserID, Created: false}, nil
+	}
+
+	profile := loginProfileDoc{
+		ID:               uuid.New(),
+		UserID:           ticket.UserID,
+		ThirdPartyAuth:   constants.Auth0ThirdPartyAuth,
+		ThirdPartyAuthID: subject,
+		LastLoginAt:      &now,
+	}
+	modelcore.StampCreate(&profile.Auditable, ticket.UserID.String(), now)
+	if _, err := database.Db.Collection(constants.LoginProfilesCollection).InsertOne(ctx, profile); err != nil {
+		if !mongo.IsDuplicateKeyError(err) {
+			return LinkResult{}, err
+		}
+		// Lost a race with a concurrent link/provision for the same subject.
+		existing, findErr := findLoginProfileBySubject(ctx, subject)
+		if findErr != nil {
+			return LinkResult{}, findErr
+		}
+		if existing == nil {
+			return LinkResult{}, err
+		}
+		if existing.UserID != ticket.UserID {
+			return LinkResult{}, ErrLinkConflict
+		}
+		return LinkResult{UserID: ticket.UserID, Created: false}, nil
+	}
+
+	return LinkResult{UserID: ticket.UserID, Created: true}, nil
+}
+
 // findUserByEmail decodes leniently via bson.Raw rather than straight into userDoc: a legacy
 // document predating this Go service (e.g. a manually bootstrapped admin record, see auth-api's
 // AGENTS.md for the equivalent user_roles bootstrap procedure) can have `_id` stored as a plain

@@ -10,6 +10,7 @@ func SetupHandlers(g *gin.Engine, authzClient *authz.Client) {
 	setupProvisionHandlers(g, authzClient)
 	setupResolveSubjectsHandlers(g, authzClient)
 	setupProfileHandlers(g, authzClient)
+	setupIdentitiesHandlers(g, authzClient)
 	setupFriendsHandlers(g, authzClient)
 	setupStatusHandlers(g)
 }
