@@ -89,7 +89,7 @@ func UnlinkIdentity(ctx context.Context, userID, loginProfileID uuid.UUID) error
 	return nil
 }
 
-func loginProfilesForUser(ctx context.Context, userID uuid.UUID) ([]loginProfileDoc, error) {
+func loginProfilesForUser(ctx context.Context, userID uuid.UUID) ([]*loginProfileDoc, error) {
 	filter := bson.D{{Key: "$and", Value: bson.A{
 		notDeletedFilter,
 		bson.D{{Key: "userId", Value: userID}},
