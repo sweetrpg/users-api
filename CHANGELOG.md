@@ -1,3 +1,21 @@
+## [0.17.0] - 2026-09-23
+
+### 🚀 Features
+
+- *(users-api)* Add account-linking ticket flow (#70)
+
+### 🐛 Bug Fixes
+
+- *(identities)* Return []*loginProfileDoc from loginProfilesForUser
+
+### 🎨 Styling
+
+- *(models)* Gofmt link_ticket.go struct alignment
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.16.0
+- Start work on link-user-accounts (#70)
 ## [0.16.0] - 2026-09-09
 
 ### 🚀 Features
