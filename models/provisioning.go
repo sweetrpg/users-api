@@ -61,7 +61,7 @@ func dropLegacyLoginProfileUsernameIndex(ctx context.Context, collection *mongo.
 	if err != nil {
 		return err
 	}
-	defer cursor.Close(ctx)
+	defer func() { _ = cursor.Close(ctx) }()
 
 	var legacyIndexNames []string
 	for cursor.Next(ctx) {
