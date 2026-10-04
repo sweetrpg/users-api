@@ -73,7 +73,7 @@
 				
 				<option value="file8">github.com/sweetrpg/users-api/models/profile.go (73.8%)</option>
 				
-				<option value="file9">github.com/sweetrpg/users-api/models/provisioning.go (73.8%)</option>
+				<option value="file9">github.com/sweetrpg/users-api/models/provisioning.go (69.4%)</option>
 				
 				<option value="file10">github.com/sweetrpg/users-api/models/stats.go (88.0%)</option>
 				
@@ -1918,10 +1918,10 @@ type FriendRequest struct {
 // orderPair returns x and y sorted so the first return value is the lexicographically smaller
 // of the two 16-byte ids - the canonical (userA, userB) ordering every friendship write uses.
 func orderPair(x, y uuid.UUID) (a, b uuid.UUID) <span class="cov10" title="15">{
-        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov7" title="7">{
+        if bytes.Compare(x[:], y[:]) &lt;= 0 </span><span class="cov7" title="8">{
                 return x, y
         }</span>
-        <span class="cov7" title="8">return y, x</span>
+        <span class="cov7" title="7">return y, x</span>
 }
 
 // EnsureFriendshipIndexes creates the unique index on friendships.(userA, userB) that
@@ -2550,7 +2550,10 @@ type ProvisionResult struct {
 // to call on every startup - CreateOne is idempotent for an identical index definition.
 func EnsureLoginProfileIndexes(ctx context.Context) error <span class="cov1" title="1">{
         collection := database.Db.Collection(constants.LoginProfilesCollection)
-        if _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+        if err := dropLegacyLoginProfileUsernameIndex(ctx, collection); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov1" title="1">if _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
                 Keys: bson.D{
                         {Key: "thirdPartyAuth", Value: 1},
                         {Key: "thirdPartyAuthId", Value: 1},
@@ -2564,6 +2567,46 @@ func EnsureLoginProfileIndexes(ctx context.Context) error <span class="cov1" tit
                 Keys: bson.D{{Key: "last_login_at", Value: 1}},
         })
         return err</span>
+}
+
+// dropLegacyLoginProfileUsernameIndex removes a non-sparse unique index on login_profiles.username
+// surviving from the pre-rewrite Swift schema, which stored username directly on the login
+// profile. The current model never sets that field (username lives on users, with its own sparse
+// unique index - see EnsureUserIndexes), so a second login_profiles document ever inserted without
+// one collides with the first on a duplicate `null` key - confirmed in dev when LinkIdentity's
+// insert for a second linked identity failed with a MongoDB E11000 duplicate key error on this
+// exact index. Finds the index by its key shape rather than a hardcoded name (e.g. "username_1"),
+// since the name was never verified against the live database and a mismatch would silently no-op
+// this fix. Safe to call on every startup - a no-op once the index is gone.
+func dropLegacyLoginProfileUsernameIndex(ctx context.Context, collection *mongo.Collection) error <span class="cov1" title="1">{
+        cursor, err := collection.Indexes().List(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov1" title="1">defer func() </span><span class="cov1" title="1">{ _ = cursor.Close(ctx) }</span>()
+
+        <span class="cov1" title="1">var legacyIndexNames []string
+        for cursor.Next(ctx) </span><span class="cov0" title="0">{
+                var index bson.M
+                if err := cursor.Decode(&amp;index); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov0" title="0">if keys, ok := index["key"].(bson.M); ok &amp;&amp; len(keys) == 1 &amp;&amp; keys["username"] == int32(1) </span><span class="cov0" title="0">{
+                        if name, ok := index["name"].(string); ok </span><span class="cov0" title="0">{
+                                legacyIndexNames = append(legacyIndexNames, name)
+                        }</span>
+                }
+        }
+        <span class="cov1" title="1">if err := cursor.Err(); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov1" title="1">for _, name := range legacyIndexNames </span><span class="cov0" title="0">{
+                if _, err := collection.Indexes().DropOne(ctx, name); err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("dropping legacy login_profiles.%s index: %w", name, err)
+                }</span>
+        }
+        <span class="cov1" title="1">return nil</span>
 }
 
 // EnsureUserIndexes creates the unique index on users.email - inherited from the original Swift
