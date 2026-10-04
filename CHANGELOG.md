@@ -1,3 +1,13 @@
+## [0.17.1] - 2026-10-04
+
+### 🐛 Bug Fixes
+
+- *(models)* Drop stale login_profiles.username unique index
+- *(lint)* Check cursor.Close error in dropLegacyLoginProfileUsernameIndex
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.17.0
 ## [0.17.0] - 2026-09-23
 
 ### 🚀 Features
