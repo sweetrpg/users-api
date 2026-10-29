@@ -1,3 +1,12 @@
+## [0.17.2] - 2026-10-29
+
+### 🐛 Bug Fixes
+
+- *(ratelimit)* Bump api-core.go to v0.4.0 and set explicit limits
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.17.1
 ## [0.17.1] - 2026-10-04
 
 ### 🐛 Bug Fixes
