@@ -23,7 +23,15 @@ type profileResponse struct {
 	Bio      string    `json:"bio"`
 	Website  string    `json:"website"`
 	Username string    `json:"username"`
+	// TermsAccepted is the terms version the user accepted and when; null until they accept.
+	TermsAccepted *models.TermsAccepted `json:"terms_accepted"`
 }
+
+// Test seams: the profile lookup and the terms store go to MongoDB in production.
+var (
+	profileLookup                   = models.FindProfileBySubject
+	termsStore    models.TermsStore = models.MongoTermsStore{}
+)
 
 type updateProfileRequest struct {
 	Name     string `json:"name"`
@@ -37,6 +45,7 @@ func setupProfileHandlers(g *gin.Engine, authzClient *authz.Client) {
 
 	g.GET("/profile", getProfileHandler(authzClient))
 	g.PATCH("/profile", updateProfileHandler(authzClient))
+	g.PUT("/profile/terms", acceptTermsHandler(authzClient))
 }
 
 // Get the caller's own profile.
@@ -59,7 +68,7 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 			return
 		}
 
-		profile, err := models.FindProfileBySubject(c.Request.Context(), subject)
+		profile, err := profileLookup(c.Request.Context(), subject)
 		if err != nil {
 			if err == models.ErrProfileNotFound {
 				logging.Logger.Warn("profile lookup found no User/LoginProfile for subject", "subject", subject)
@@ -73,7 +82,7 @@ func getProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, profileResponse{
 			UserID: profile.UserID, Name: profile.Name, Email: profile.Email,
-			Bio: profile.Bio, Website: profile.Website, Username: profile.Username,
+			Bio: profile.Bio, Website: profile.Website, Username: profile.Username, TermsAccepted: profile.TermsAccepted,
 		})
 	}
 }
@@ -114,7 +123,7 @@ func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 			return
 		}
 
-		existing, err := models.FindProfileBySubject(c.Request.Context(), subject)
+		existing, err := profileLookup(c.Request.Context(), subject)
 		if err != nil {
 			if err == models.ErrProfileNotFound {
 				c.JSON(http.StatusNotFound, apiv.ErrorVO{Error: "not_found", Message: "no profile for this identity yet"})
@@ -147,6 +156,7 @@ func updateProfileHandler(authzClient *authz.Client) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, profileResponse{
 			UserID: existing.UserID, Name: req.Name, Email: existing.Email, Bio: req.Bio, Website: req.Website, Username: username,
+			TermsAccepted: existing.TermsAccepted,
 		})
 	}
 }
