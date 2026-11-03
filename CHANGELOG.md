@@ -1,3 +1,12 @@
+## [0.18.0] - 2026-11-03
+
+### 🚀 Features
+
+- *(profile)* Record acceptance of the terms of service
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.17.2
 ## [0.17.2] - 2026-10-29
 
 ### 🐛 Bug Fixes
