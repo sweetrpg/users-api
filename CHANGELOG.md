@@ -1,3 +1,12 @@
+## [0.18.2] - 2026-11-03
+
+### 🐛 Bug Fixes
+
+- *(models)* Accept an equivalent existing index under another name
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.18.1
 ## [0.18.1] - 2026-11-03
 
 ### 🐛 Bug Fixes
