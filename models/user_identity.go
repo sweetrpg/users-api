@@ -4,6 +4,7 @@ package models
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +41,34 @@ type userDoc struct {
 	Username string    `bson:"username,omitempty"`
 
 	modelcore.Auditable `bson:",inline"`
+}
+
+// userDocBody is userDoc without its id, so UnmarshalBSON can decode the id on its own.
+type userDocBody struct {
+	Name     string `bson:"name"`
+	Email    string `bson:"email"`
+	Bio      string `bson:"bio"`
+	Website  string `bson:"website"`
+	Username string `bson:"username,omitempty"`
+
+	modelcore.Auditable `bson:",inline"`
+}
+
+// UnmarshalBSON accepts the _id in either stored form: binary, or the plain string (any case) that
+// documents written by the pre-Go Swift service carry. A strict uuid.UUID field fails the whole
+// query on the first legacy document. Encoding is unchanged: the id is written as binary.
+func (d *userDoc) UnmarshalBSON(data []byte) error {
+	raw := bson.Raw(data)
+	id, err := decodeFlexibleUUID(raw.Lookup("_id"))
+	if err != nil {
+		return fmt.Errorf("decoding user _id: %w", err)
+	}
+	var body userDocBody
+	if err := bson.Unmarshal(data, &body); err != nil {
+		return err
+	}
+	*d = userDoc{ID: id, Name: body.Name, Email: body.Email, Bio: body.Bio, Website: body.Website, Username: body.Username, Auditable: body.Auditable}
+	return nil
 }
 
 // loginProfileDoc is the login_profiles collection document shape (Swift Fluent's

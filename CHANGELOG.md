@@ -1,3 +1,13 @@
+## [0.18.1] - 2026-11-03
+
+### 🐛 Bug Fixes
+
+- *(models)* Decode legacy string user ids
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.18.0
+- *(debug)* Restrict workflow token permissions
 ## [0.18.0] - 2026-11-03
 
 ### 🚀 Features
