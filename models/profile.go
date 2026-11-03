@@ -32,6 +32,8 @@ type Profile struct {
 	Bio      string
 	Website  string
 	Username string
+	// TermsAccepted is nil until the user accepts the terms.
+	TermsAccepted *TermsAccepted
 }
 
 // userIDFilter matches _id against this service's own binary uuid.UUID encoding and both cases
@@ -90,7 +92,10 @@ func FindProfileBySubject(ctx context.Context, subject string) (*Profile, error)
 	website, _ := raw.Lookup("website").StringValueOK()
 	username, _ := raw.Lookup("username").StringValueOK()
 
-	return &Profile{UserID: id, Name: name, Email: email, Bio: bio, Website: website, Username: username}, nil
+	return &Profile{
+		UserID: id, Name: name, Email: email, Bio: bio, Website: website, Username: username,
+		TermsAccepted: decodeTermsAccepted(raw),
+	}, nil
 }
 
 // UpdateProfile updates name/bio/website/username for userID - email is never writable through
