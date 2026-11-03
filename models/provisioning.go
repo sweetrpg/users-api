@@ -31,7 +31,7 @@ func EnsureLoginProfileIndexes(ctx context.Context) error {
 	if err := dropLegacyLoginProfileUsernameIndex(ctx, collection); err != nil {
 		return err
 	}
-	if _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	if err := ensureIndex(ctx, mongoIndexer{collection.Indexes()}, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "thirdPartyAuth", Value: 1},
 			{Key: "thirdPartyAuthId", Value: 1},
@@ -41,7 +41,7 @@ func EnsureLoginProfileIndexes(ctx context.Context) error {
 		return err
 	}
 	// Backs the admin active-user count's `last_login_at >= cutoff` scan.
-	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	err := ensureIndex(ctx, mongoIndexer{collection.Indexes()}, mongo.IndexModel{
 		Keys: bson.D{{Key: "last_login_at", Value: 1}},
 	})
 	return err
@@ -96,7 +96,7 @@ func dropLegacyLoginProfileUsernameIndex(ctx context.Context, collection *mongo.
 // every startup - CreateOne is idempotent for an identical index definition.
 func EnsureUserIndexes(ctx context.Context) error {
 	collection := database.Db.Collection(constants.UsersCollection)
-	if _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	if err := ensureIndex(ctx, mongoIndexer{collection.Indexes()}, mongo.IndexModel{
 		Keys:    bson.D{{Key: "email", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}); err != nil {
@@ -104,7 +104,7 @@ func EnsureUserIndexes(ctx context.Context) error {
 	}
 	// Sparse so the many pre-existing user docs without a username (backfilled lazily, see
 	// username.go) don't all collide on a null key.
-	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	err := ensureIndex(ctx, mongoIndexer{collection.Indexes()}, mongo.IndexModel{
 		Keys:    bson.D{{Key: "username", Value: 1}},
 		Options: options.Index().SetUnique(true).SetSparse(true),
 	})

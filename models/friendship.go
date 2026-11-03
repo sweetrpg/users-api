@@ -119,7 +119,7 @@ func orderPair(x, y uuid.UUID) (a, b uuid.UUID) {
 // identical index definition.
 func EnsureFriendshipIndexes(ctx context.Context) error {
 	collection := database.Db.Collection(constants.FriendshipsCollection)
-	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	err := ensureIndex(ctx, mongoIndexer{collection.Indexes()}, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "userA", Value: 1},
 			{Key: "userB", Value: 1},
