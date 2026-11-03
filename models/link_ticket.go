@@ -48,7 +48,7 @@ type linkTicketDoc struct {
 // identical index definition.
 func EnsureLinkTicketIndexes(ctx context.Context) error {
 	collection := database.Db.Collection(constants.LinkTicketsCollection)
-	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+	err := ensureIndex(ctx, mongoIndexer{collection.Indexes()}, mongo.IndexModel{
 		Keys:    bson.D{{Key: "createdAt", Value: 1}},
 		Options: options.Index().SetExpireAfterSeconds(int32(linkTicketTTL.Seconds())),
 	})
