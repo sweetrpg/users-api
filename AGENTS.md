@@ -38,6 +38,27 @@ the `admin` role, verified against `auth-api`'s `/authz/check` via the `authz` p
 own Auth0 access token from its shared session as the bearer credential. The former shared-secret
 fallback (`X-Internal-Service-Token`) was removed once all known callers had migrated.
 
+## Self-service profile routes
+
+All use the caller's own bearer token, verified by `auth-api`; the user is whoever the token
+resolves to and no user ID is read from a request.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /profile` | The caller's profile, including `terms_accepted` (`{version, accepted_at}`, or `null`) |
+| `PATCH /profile` | Update name, bio, website, username |
+| `PUT /profile/terms` | Record acceptance of a terms version: body `{"version": "1.0"}` |
+
+`PUT /profile/terms` returns `{"version", "accepted_at"}` (200). `version` is dotted numeric (`1.0`,
+`1.0.1`; one to four segments, no leading zeros) and compares segment by segment as numbers
+(`1.10` is newer than `1.9`; `1.0` equals `1.0.0`). `accepted_at` is set by the server, in UTC.
+Accepting the same version again returns the stored record unchanged (the original `accepted_at`).
+A version that is not newer than the stored one is `409` `terms_version_not_newer` with
+`current_version`. A malformed version is `400` `invalid_version`; no profile yet is `404`. The
+record changes only by accepting a newer version; there is no admin edit and no clear. The write is
+a compare-and-set on the stored version, so two racing acceptances cannot lower the version, and
+the document's `updated_at`/`updated_by` are stamped with the acceptance time and the owner.
+
 ## Language and Framework
 
 Go, following `sweetrpg/platform`'s `docs/service-conventions.md` baseline: Gin, `api-core.go`

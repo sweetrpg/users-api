@@ -27,6 +27,12 @@ go run cmd/users-api/main.go
 
 Serves on `:8000` (`BIND_ADDRESS` to override).
 
+## Routes
+
+Self-service profile (caller's own token): `GET /profile`, `PATCH /profile`,
+`PUT /profile/terms` (`{"version": "1.0"}`, records acceptance of the terms; see `AGENTS.md`
+for the rules and error codes). Admin: `GET /admin/users`, `GET /admin/stats`.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and this repo's `AGENTS.md`
