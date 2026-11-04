@@ -1,3 +1,12 @@
+## [0.18.3] - 2026-11-04
+
+### 🐛 Bug Fixes
+
+- *(models)* Rename the legacy users email index
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.18.2
 ## [0.18.2] - 2026-11-03
 
 ### 🐛 Bug Fixes
