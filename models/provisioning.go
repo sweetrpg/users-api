@@ -96,7 +96,11 @@ func dropLegacyLoginProfileUsernameIndex(ctx context.Context, collection *mongo.
 // every startup - CreateOne is idempotent for an identical index definition.
 func EnsureUserIndexes(ctx context.Context) error {
 	collection := database.Db.Collection(constants.UsersCollection)
-	if err := ensureIndex(ctx, mongoIndexer{collection.Indexes()}, mongo.IndexModel{
+	ix := mongoIndexer{collection.Indexes()}
+	if err := renameLegacyEmailIndex(ctx, ix); err != nil {
+		return err
+	}
+	if err := ensureIndex(ctx, ix, mongo.IndexModel{
 		Keys:    bson.D{{Key: "email", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}); err != nil {
@@ -109,6 +113,21 @@ func EnsureUserIndexes(ctx context.Context) error {
 		Options: options.Index().SetUnique(true).SetSparse(true),
 	})
 	return err
+}
+
+// renameLegacyEmailIndex drops the email index the Swift service created under the name "unique"
+// so ensureIndex recreates it as email_1. Uniqueness lapses for the instant between the drop and
+// the create, accepted while the platform has no production traffic. Idempotent: a no-op once the
+// legacy name is gone.
+func renameLegacyEmailIndex(ctx context.Context, ix indexer) error {
+	dropped, err := dropLegacyIndex(ctx, ix, "unique", bson.D{{Key: "email", Value: 1}})
+	if err != nil {
+		return fmt.Errorf("dropping legacy users.unique index: %w", err)
+	}
+	if dropped {
+		logging.Logger.Info("dropped the legacy users email index named unique; recreating it as email_1")
+	}
+	return nil
 }
 
 // FindOrCreateUser returns the User.id linked to subject's Auth0 login, creating a new User and

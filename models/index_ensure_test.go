@@ -14,6 +14,12 @@ type fakeIndexer struct {
 	createErr error
 	existing  []bson.Raw
 	created   int
+	dropped   []string
+}
+
+func (f *fakeIndexer) drop(_ context.Context, name string) error {
+	f.dropped = append(f.dropped, name)
+	return nil
 }
 
 func (f *fakeIndexer) create(context.Context, mongo.IndexModel) error {
@@ -84,6 +90,40 @@ func TestEquivalenceChecksSparseAndExpiry(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			if got := equivalentIndex(spec(t, c.have), c.want); got != c.ok {
 				t.Errorf("equivalent = %v, want %v", got, c.ok)
+			}
+		})
+	}
+}
+
+func legacySpec(t *testing.T, name string, key bson.D) bson.Raw {
+	return spec(t, bson.D{{Key: "name", Value: name}, {Key: "key", Value: key}, {Key: "unique", Value: true}})
+}
+
+func TestLegacyEmailIndexNamedUniqueIsDropped(t *testing.T) {
+	ix := &fakeIndexer{existing: []bson.Raw{
+		legacySpec(t, "_id_", bson.D{{Key: "_id", Value: int32(1)}}),
+		legacySpec(t, "unique", bson.D{{Key: "email", Value: int32(1)}}),
+	}}
+	if err := renameLegacyEmailIndex(context.Background(), ix); err != nil {
+		t.Fatal(err)
+	}
+	if len(ix.dropped) != 1 || ix.dropped[0] != "unique" {
+		t.Errorf("dropped = %v, want [unique]", ix.dropped)
+	}
+}
+
+func TestLegacyRenameLeavesOtherIndexesAlone(t *testing.T) {
+	cases := map[string][]bson.Raw{
+		"already renamed":          {legacySpec(t, "email_1", bson.D{{Key: "email", Value: int32(1)}})},
+		"name unique on other key": {legacySpec(t, "unique", bson.D{{Key: "username", Value: int32(1)}})},
+		"compound with email":      {legacySpec(t, "unique", bson.D{{Key: "email", Value: int32(1)}, {Key: "x", Value: int32(1)}})},
+		"no indexes":               nil,
+	}
+	for name, existing := range cases {
+		t.Run(name, func(t *testing.T) {
+			ix := &fakeIndexer{existing: existing}
+			if err := renameLegacyEmailIndex(context.Background(), ix); err != nil || len(ix.dropped) != 0 {
+				t.Errorf("err = %v, dropped = %v, want nothing dropped", err, ix.dropped)
 			}
 		})
 	}

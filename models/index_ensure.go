@@ -20,12 +20,18 @@ const (
 type indexer interface {
 	create(ctx context.Context, m mongo.IndexModel) error
 	list(ctx context.Context) ([]bson.Raw, error)
+	drop(ctx context.Context, name string) error
 }
 
 type mongoIndexer struct{ view mongo.IndexView }
 
 func (m mongoIndexer) create(ctx context.Context, model mongo.IndexModel) error {
 	_, err := m.view.CreateOne(ctx, model)
+	return err
+}
+
+func (m mongoIndexer) drop(ctx context.Context, name string) error {
+	_, err := m.view.DropOne(ctx, name)
 	return err
 }
 
@@ -149,4 +155,26 @@ func sameExpiry(existing bson.Raw, want mongo.IndexModel) bool {
 	}
 	n, ok := number(have)
 	return haveErr == nil && ok && int32(n) == *want.Options.ExpireAfterSeconds
+}
+
+// dropLegacyIndex drops the index called legacyName when its keys are exactly keys, so the
+// default-named index the code wants can be created in its place. It reports whether it dropped
+// one; a missing index, or one with that name on other keys, is left alone.
+func dropLegacyIndex(ctx context.Context, ix indexer, legacyName string, keys bson.D) (bool, error) {
+	want, err := bson.Marshal(keys)
+	if err != nil {
+		return false, err
+	}
+	existing, err := ix.list(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range existing {
+		name, _ := e.Lookup("name").StringValueOK()
+		have, ok := e.Lookup("key").DocumentOK()
+		if name == legacyName && ok && sameKeys(have, bson.Raw(want)) {
+			return true, ix.drop(ctx, name)
+		}
+	}
+	return false, nil
 }
