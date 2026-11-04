@@ -24,9 +24,9 @@ func setupResolveSubjectsHandlers(g *gin.Engine, authzClient *authz.Client) {
 //
 //	 Internal batch endpoint for the canonical-user-id backfills: maps a batch of `*_by` subject
 //	 values to the user ids they belong to, so audit fields written with a pre-canonical prompt
-//	 subject can be rewritten to the user's canonical id. Requires an admin bearer token, the
-//	 same write-auth the admin routes use - the caller is a trusted platform backfill, not an
-//	 end user. Subjects with no resolvable user (no non-deleted Auth0 login profile) are omitted
+//	 subject can be rewritten to the user's canonical id. Requires an admin bearer token (the
+//	 same write-auth the admin routes use) or the shared X-Internal-Service-Token that auth-api
+//	 presents - the caller is a trusted platform service, not an end user. Subjects with no resolvable user (no non-deleted Auth0 login profile) are omitted
 //	 from the response; the caller treats those as the "system" actor (see the
 //	 canonical-user-id-provenance design Decision 3).
 //		@Summary		Resolve subjects to user ids
@@ -43,8 +43,10 @@ func setupResolveSubjectsHandlers(g *gin.Engine, authzClient *authz.Client) {
 //		@Router			/internal/resolve-subjects [post]
 func resolveSubjectsHandler(authzClient *authz.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if _, ok := resolveAdminSubject(c, authzClient); !ok {
-			return
+		if !hasValidInternalServiceToken(c) {
+			if _, ok := resolveAdminSubject(c, authzClient); !ok {
+				return
+			}
 		}
 
 		var req resolveSubjectsRequest

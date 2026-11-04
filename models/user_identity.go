@@ -98,9 +98,12 @@ type loginProfileDoc struct {
 // matching the Swift service's synthesized Codable encoding of an Optional
 // property.
 type UserIdentity struct {
-	ID      uuid.UUID `json:"id"`
-	Email   string    `json:"email"`
-	Subject *string   `json:"subject,omitempty"`
+	ID    uuid.UUID `json:"id"`
+	Email string    `json:"email"`
+	// Subject is the first linked login, kept for callers that predate Subjects.
+	Subject *string `json:"subject,omitempty"`
+	// Subjects is every Auth0 login linked to the user; empty (not null) when there is none.
+	Subjects []string `json:"subjects"`
 }
 
 // ListUserIdentities returns every non-soft-deleted user's id/email, paired
@@ -122,22 +125,7 @@ func ListUserIdentities(ctx context.Context) ([]UserIdentity, error) {
 		return nil, err
 	}
 
-	subjectsByUserID := make(map[uuid.UUID]string, len(profiles))
-	for _, p := range profiles {
-		if _, exists := subjectsByUserID[p.UserID]; !exists {
-			subjectsByUserID[p.UserID] = p.ThirdPartyAuthID
-		}
-	}
-
-	identities := make([]UserIdentity, 0, len(users))
-	for _, u := range users {
-		identity := UserIdentity{ID: u.ID, Email: u.Email}
-		if subject, ok := subjectsByUserID[u.ID]; ok {
-			identity.Subject = &subject
-		}
-		identities = append(identities, identity)
-	}
-	return identities, nil
+	return buildIdentities(users, profiles), nil
 }
 
 // ResolveSubjectIDs maps the given Auth0 subjects to the users._id each resolves to, by
@@ -170,4 +158,23 @@ func ResolveSubjectIDs(ctx context.Context, subjects []string) (map[string]strin
 		}
 	}
 	return resolved, nil
+}
+
+// buildIdentities pairs each user with the subjects of all its login profiles, in profile order.
+func buildIdentities(users []*userDoc, profiles []*loginProfileDoc) []UserIdentity {
+	subjectsByUserID := make(map[uuid.UUID][]string, len(profiles))
+	for _, p := range profiles {
+		subjectsByUserID[p.UserID] = append(subjectsByUserID[p.UserID], p.ThirdPartyAuthID)
+	}
+	identities := make([]UserIdentity, 0, len(users))
+	for _, u := range users {
+		identity := UserIdentity{ID: u.ID, Email: u.Email, Subjects: []string{}}
+		if subjects := subjectsByUserID[u.ID]; len(subjects) > 0 {
+			identity.Subjects = subjects
+			first := subjects[0]
+			identity.Subject = &first
+		}
+		identities = append(identities, identity)
+	}
+	return identities
 }
