@@ -13,7 +13,6 @@ resources:
     - secrets/cache.yaml
     - secrets/db-creds.yaml
     - secrets/db.yaml
-    - secrets/misc.yaml
 
 labels:
     - pairs:

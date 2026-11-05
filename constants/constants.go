@@ -10,11 +10,6 @@ const (
 	// AUTH_API_URL is auth-api's base URL, used to verify forwarded user bearer tokens via
 	// /authz/check for both GET /api/admin/users and POST /internal/identities/provision.
 	AUTH_API_URL = "AUTH_API_URL"
-
-	// INTERNAL_SERVICE_TOKEN is the secret shared with auth-api (the same value admin-web presents
-	// to it). auth-api sends it as X-Internal-Service-Token to POST /internal/resolve-subjects,
-	// where it has no end-user bearer token to forward.
-	INTERNAL_SERVICE_TOKEN = "INTERNAL_SERVICE_TOKEN"
 )
 
 // Value constants

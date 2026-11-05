@@ -72,13 +72,12 @@ The Go rewrite dropped the Swift service's Redis-backed Vapor session store (it 
 the already-dead OAuth login controllers). Redis is back for one purpose only: the per-client/IP
 rate limiter's distributed counters (see "Rate limiting"), not sessions.
 
-## Internal service calls
+## Internal calls
 
-`POST /internal/resolve-subjects` maps Auth0 subjects to canonical user IDs. It accepts an admin
-bearer token or the shared `X-Internal-Service-Token` (`INTERNAL_SERVICE_TOKEN`, the secret
-auth-api and admin-web already share, delivered by the dev `api-misc` ExternalSecret). auth-api
-uses it to attribute admin writes and to resolve a caller's roles by user. `GET /admin/users`
-returns `subjects` (every linked login) next to the legacy `subject` (the first).
+`POST /internal/resolve-subjects` maps Auth0 subjects to canonical user IDs for callers that hold an
+admin user's bearer token (auth-api's admin routes, the backfill commands). There are no service
+tokens (PADR-0037). `GET /admin/users` returns `subjects` (every linked login) next to the legacy
+`subject` (the first).
 
 ## Rate limiting
 
