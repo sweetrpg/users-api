@@ -163,37 +163,14 @@ func requireNoError(t *testing.T, err error) {
 	}
 }
 
-func TestResolveSubjects_AcceptsTheInternalServiceToken(t *testing.T) {
-	t.Setenv(constants.INTERNAL_SERVICE_TOKEN, "shared-secret")
-	post := func(token string) int {
-		r := newResolveSubjectsTestRouter(t, "")
-		req := httptest.NewRequest(http.MethodPost, "/internal/resolve-subjects", strings.NewReader(`{"subjects":[]}`))
-		if token != "" {
-			req.Header.Set(internalServiceTokenHeader, token)
-		}
-		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, req)
-		return rec.Code
-	}
-	if code := post("shared-secret"); code != http.StatusOK {
-		t.Errorf("matching token: status = %d, want 200", code)
-	}
-	if code := post("wrong"); code != http.StatusUnauthorized {
-		t.Errorf("wrong token: status = %d, want 401", code)
-	}
-	if code := post(""); code != http.StatusUnauthorized {
-		t.Errorf("no credentials: status = %d, want 401", code)
-	}
-}
-
-func TestResolveSubjects_UnsetInternalTokenNeverMatches(t *testing.T) {
-	t.Setenv(constants.INTERNAL_SERVICE_TOKEN, "")
+func TestResolveSubjects_RejectsAnInternalServiceTokenHeader(t *testing.T) {
+	t.Setenv("INTERNAL_SERVICE_TOKEN", "shared-secret")
 	r := newResolveSubjectsTestRouter(t, "")
 	req := httptest.NewRequest(http.MethodPost, "/internal/resolve-subjects", strings.NewReader(`{"subjects":[]}`))
-	req.Header.Set(internalServiceTokenHeader, "")
+	req.Header.Set("X-Internal-Service-Token", "shared-secret")
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rec.Code)
+		t.Errorf("status = %d, want 401: a service token is not a credential", rec.Code)
 	}
 }
