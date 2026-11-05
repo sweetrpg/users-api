@@ -1,3 +1,16 @@
+## [0.19.0] - 2026-11-05
+
+### 🚀 Features
+
+- *(internal)* Let auth-api resolve subjects and list every linked login
+
+### 🐛 Bug Fixes
+
+- *(internal)* Remove the internal service token path from resolve-subjects
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.18.3
 ## [0.18.3] - 2026-11-04
 
 ### 🐛 Bug Fixes

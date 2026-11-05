@@ -162,3 +162,15 @@ func requireNoError(t *testing.T, err error) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestResolveSubjects_RejectsAnInternalServiceTokenHeader(t *testing.T) {
+	t.Setenv("INTERNAL_SERVICE_TOKEN", "shared-secret")
+	r := newResolveSubjectsTestRouter(t, "")
+	req := httptest.NewRequest(http.MethodPost, "/internal/resolve-subjects", strings.NewReader(`{"subjects":[]}`))
+	req.Header.Set("X-Internal-Service-Token", "shared-secret")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401: a service token is not a credential", rec.Code)
+	}
+}
