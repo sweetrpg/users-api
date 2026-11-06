@@ -79,6 +79,12 @@ admin user's bearer token (auth-api's admin routes, the backfill commands). Ther
 tokens (PADR-0037). `GET /admin/users` returns `subjects` (every linked login) next to the legacy
 `subject` (the first).
 
+## Identity labels
+
+`GET /admin/users` items carry `name` and `username` (omitted when unset) so admin-web can label a
+user with no email. A login refreshes a stored name that is empty or the `User` placeholder with
+the name the login supplies (`RefreshPlaceholderName`); a real stored name is never overwritten.
+
 ## Rate limiting
 
 Per-client/IP rate limiting is on by default via the shared `api-core.go/ratelimit` middleware
