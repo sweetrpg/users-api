@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -130,6 +131,40 @@ func renameLegacyEmailIndex(ctx context.Context, ix indexer) error {
 	return nil
 }
 
+// placeholderName is what auth-web sent as the name when the login carried no name, nickname or
+// email.
+const placeholderName = "User"
+
+// isPlaceholderName reports whether a stored or incoming name carries no information.
+func isPlaceholderName(name string) bool {
+	n := strings.TrimSpace(name)
+	return n == "" || strings.EqualFold(n, placeholderName)
+}
+
+// RefreshPlaceholderName replaces an empty or "User" placeholder name with a real one from the
+// latest login. A real stored name is never overwritten (profile edits stay the user's), and a
+// placeholder incoming name changes nothing. Best effort, like the username backfill.
+func RefreshPlaceholderName(ctx context.Context, userID uuid.UUID, name string) error {
+	if isPlaceholderName(name) {
+		return nil
+	}
+	filter := bson.D{{Key: "$and", Value: bson.A{
+		notDeletedFilter,
+		userIDFilter(userID),
+		bson.D{{Key: "$or", Value: bson.A{
+			bson.D{{Key: "name", Value: bson.D{{Key: "$exists", Value: false}}}},
+			bson.D{{Key: "name", Value: bson.D{{Key: "$in", Value: bson.A{"", "User", "user", "USER"}}}}},
+		}}},
+	}}}
+	update := bson.D{{Key: "$set", Value: bson.D{
+		{Key: "name", Value: strings.TrimSpace(name)},
+		{Key: "updated_at", Value: time.Now().UTC()},
+		{Key: "updated_by", Value: modelcore.SystemActor},
+	}}}
+	_, err := database.Db.Collection(constants.UsersCollection).UpdateOne(ctx, filter, update)
+	return err
+}
+
 // FindOrCreateUser returns the User.id linked to subject's Auth0 login, creating a new User and
 // LoginProfile the first time that subject is seen. name/email seed the new User doc on creation
 // only - a repeat call for an existing subject never overwrites them (profile edits are a
@@ -144,6 +179,9 @@ func FindOrCreateUser(ctx context.Context, subject, name, email string) (Provisi
 		// effort - a failure here shouldn't block the login.
 		if err := EnsureUsername(ctx, profile.UserID, usernameSeed(email, name)); err != nil {
 			logging.Logger.Warn("username backfill failed", "userId", profile.UserID.String(), "error", err.Error())
+		}
+		if err := RefreshPlaceholderName(ctx, profile.UserID, name); err != nil {
+			logging.Logger.Warn("name refresh failed", "userId", profile.UserID.String(), "error", err.Error())
 		}
 		touchLoginProfile(ctx, profile.ID, now)
 		return ProvisionResult{UserID: profile.UserID, Created: false}, nil
