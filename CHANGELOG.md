@@ -1,3 +1,12 @@
+## [0.20.0] - 2026-11-06
+
+### 🚀 Features
+
+- *(admin)* Return name and username, refresh placeholder names
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* Merge master into develop after v0.19.0
 ## [0.19.0] - 2026-11-05
 
 ### 🚀 Features
