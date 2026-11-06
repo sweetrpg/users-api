@@ -100,6 +100,9 @@ type loginProfileDoc struct {
 type UserIdentity struct {
 	ID    uuid.UUID `json:"id"`
 	Email string    `json:"email"`
+	// Name and Username label a user with no email; omitted when unset.
+	Name     string `json:"name,omitempty"`
+	Username string `json:"username,omitempty"`
 	// Subject is the first linked login, kept for callers that predate Subjects.
 	Subject *string `json:"subject,omitempty"`
 	// Subjects is every Auth0 login linked to the user; empty (not null) when there is none.
@@ -168,7 +171,7 @@ func buildIdentities(users []*userDoc, profiles []*loginProfileDoc) []UserIdenti
 	}
 	identities := make([]UserIdentity, 0, len(users))
 	for _, u := range users {
-		identity := UserIdentity{ID: u.ID, Email: u.Email, Subjects: []string{}}
+		identity := UserIdentity{ID: u.ID, Email: u.Email, Name: u.Name, Username: u.Username, Subjects: []string{}}
 		if subjects := subjectsByUserID[u.ID]; len(subjects) > 0 {
 			identity.Subjects = subjects
 			first := subjects[0]
