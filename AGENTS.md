@@ -85,6 +85,33 @@ tokens (PADR-0037). `GET /admin/users` returns `subjects` (every linked login) n
 user with no email. A login refreshes a stored name that is empty or the `User` placeholder with
 the name the login supplies (`RefreshPlaceholderName`); a real stored name is never overwritten.
 
+## Creating users by hand
+
+Service-account users (such as the initiative reconciler) have no login flow, so they're inserted
+with mongosh. The stored shape matters:
+
+- `users._id`, `login_profiles._id`, and `login_profiles.userId` are BSON binary subtype 00
+  (Fluent UUID), never strings. A string `_id` breaks joins with `login_profiles` and
+  `friendships`. `decodeFlexibleUUID` tolerates strings on read, which hides the problem; the
+  2026-11-13 cleanup converted three documents (an admin user, the reconciler user, and the
+  reconciler login profile).
+- `users` has unique indexes (at least `username`). To re-key a user, delete and insert in one
+  transaction. Insert-then-delete trips the unique index.
+- Audit fields are required on every document: `created_at`, `created_by`, `updated_at`,
+  `updated_by`, `deleted_at: null`, `deleted_by: null`.
+- A `login_profiles` document has `_id`, `userId`, `thirdPartyAuth` (`"auth0"`), and
+  `thirdPartyAuthId` (the Auth0 subject).
+
+```js
+// mongosh: build a Fluent-compatible binary UUID
+const bin = (uuid) =>
+  BinData(0, Buffer.from(uuid.replace(/-/g, ""), "hex").toString("base64"));
+
+const id = bin("00000000-0000-4000-8000-000000000000"); // use a freshly generated UUID
+```
+
+Check the result with `db.users.findOne({ _id: id })`; a string `_id` returns nothing.
+
 ## Rate limiting
 
 Per-client/IP rate limiting is on by default via the shared `api-core.go/ratelimit` middleware
