@@ -35,11 +35,11 @@ type statsHistoryEntry struct {
 	NewUsers   int64  `json:"new_users"`
 }
 
-// TestAdminStatsHistory_* need a reachable MongoDB - skipped unless DB_URI is set, matching the
+// TestAdminStatsHistory_* need a reachable MongoDB and fail unless DB_URI is set, matching the
 // other DB-backed admin-stats tests.
 func TestAdminStatsHistory_SeriesShapeAndClamping(t *testing.T) {
 	if os.Getenv("DB_URI") == "" {
-		t.Skip("DB_URI not set, skipping DB-backed admin-stats-history test")
+		t.Fatal("DB_URI is unset: these tests need a MongoDB, e.g. DB_URI=mongodb://localhost:27017/unit-tests")
 	}
 	database.SetupDatabase()
 
@@ -97,7 +97,7 @@ func TestAdminStatsHistory_SeriesShapeAndClamping(t *testing.T) {
 
 func TestAdminStatsHistory_CountsANewUserOnItsDay(t *testing.T) {
 	if os.Getenv("DB_URI") == "" {
-		t.Skip("DB_URI not set, skipping DB-backed admin-stats-history test")
+		t.Fatal("DB_URI is unset: these tests need a MongoDB, e.g. DB_URI=mongodb://localhost:27017/unit-tests")
 	}
 	database.SetupDatabase()
 
@@ -197,11 +197,11 @@ func TestAdminStats_AuthzUnavailableIs503(t *testing.T) {
 	}
 }
 
-// TestAdminStats_ReturnsCountsForAdmin needs a reachable MongoDB - skipped unless DB_URI is set,
+// TestAdminStats_ReturnsCountsForAdmin needs a reachable MongoDB and fails unless DB_URI is set,
 // matching the models DB-backed tests and server/resolve_subjects_test.go.
 func TestAdminStats_ReturnsCountsForAdmin(t *testing.T) {
 	if os.Getenv("DB_URI") == "" {
-		t.Skip("DB_URI not set, skipping DB-backed admin-stats test")
+		t.Fatal("DB_URI is unset: these tests need a MongoDB, e.g. DB_URI=mongodb://localhost:27017/unit-tests")
 	}
 	database.SetupDatabase()
 

@@ -93,11 +93,11 @@ func TestResolveSubjects_RejectsInvalidBodyAfterAuthzSucceeds(t *testing.T) {
 
 // TestResolveSubjects_ResolvesKnownAndOmitsUnknown asserts the handler maps a known Auth0
 // subject to its users._id (via the login_profiles join) and omits subjects with no resolvable
-// user. Requires a reachable MongoDB like the models DB-backed tests - skipped unless DB_URI is
+// user. Requires a reachable MongoDB like the models DB-backed tests, and fails unless DB_URI is
 // set (CI provides it).
 func TestResolveSubjects_ResolvesKnownAndOmitsUnknown(t *testing.T) {
 	if os.Getenv("DB_URI") == "" {
-		t.Skip("DB_URI not set, skipping DB-backed resolve-subjects test")
+		t.Fatal("DB_URI is unset: these tests need a MongoDB, e.g. DB_URI=mongodb://localhost:27017/unit-tests")
 	}
 	logging.Init()
 	database.SetupDatabase()

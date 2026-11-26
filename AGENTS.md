@@ -148,6 +148,12 @@ go vet ./...
 go test ./...
 ```
 
+The `models` tests and some `server` tests need a MongoDB and fail without one:
+
+```bash
+DB_URI=mongodb://localhost:27017/unit-tests go test ./...
+```
+
 `go run cmd/users-api/main.go` serves on `:8000` (`BIND_ADDRESS` to override). Regenerate Swagger
 docs after changing handler annotations:
 
