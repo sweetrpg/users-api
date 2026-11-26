@@ -16,14 +16,11 @@ import (
 
 // TestMain connects to the DB_URI-configured MongoDB (started as a CI service container, see
 // .github/workflows/ci.yaml/pr.yaml) and ensures the unique index FindOrCreateUser relies on.
-// Skips DB-backed tests entirely when DB_URI isn't set, so local `go test ./...` still runs
-// without a database - matching this platform's "no external service dependencies" convention
-// for local development; CI supplies DB_URI to get real coverage of the find-or-create and
-// duplicate-key-race paths.
+// Without DB_URI the package fails, so a run can't pass having tested nothing.
 func TestMain(m *testing.M) {
 	if os.Getenv("DB_URI") == "" {
-		fmt.Println("DB_URI not set, skipping models package DB-backed tests")
-		os.Exit(0)
+		fmt.Println("DB_URI is unset: these tests need a MongoDB, e.g. DB_URI=mongodb://localhost:27017/unit-tests")
+		os.Exit(1)
 	}
 
 	logging.Init()

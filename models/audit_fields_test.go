@@ -11,7 +11,7 @@ import (
 )
 
 // These assert the platform audit-fields convention (PADR-0001) on users-api's write paths.
-// DB-backed; TestMain skips the whole package without DB_URI.
+// DB-backed; TestMain fails the package without DB_URI.
 
 func TestFindOrCreateUser_StampsAuditFieldsOnUserAndLoginProfile(t *testing.T) {
 	ctx := context.Background()
